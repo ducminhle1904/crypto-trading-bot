@@ -30,23 +30,27 @@ class RsiStrategy(BaseStrategy):
         minutes = self.timeframe_minutes
         
         # Scale parameters based on timeframe
-        if minutes <= 5:  # 1m to 5m - faster settings
-            self.rsi_period = 14
-            self.rsi_overbought = 70
-            self.rsi_oversold = 30
-            self.ema_period = 50
-            self.atr_period = 14
-            self.atr_multiple = 2.0
-            self.position_max_candles = 15
+        if minutes <= 5:  # 1m to 5m - faster settings for day trading
+            self.rsi_period = 9  # Shorter RSI period for faster signals
+            self.rsi_overbought = 75  # Tighter RSI bounds for scalping
+            self.rsi_oversold = 25
+            self.ema_period = 20  # Shorter EMA for day trading
+            self.atr_period = 10  # Shorter ATR period for volatility assessment
+            self.atr_multiple = 1.0  # Tighter stops for day trading
+            self.position_max_candles = 10  # Quicker exits for day trading
+            self.use_close_price_filter = True  # Use more aggressive exit rules for scalping
+            self.profit_target_pct = 0.005  # 0.5% target for scalping
             
         elif minutes <= 60:  # 15m to 1h - medium settings
-            self.rsi_period = 14
+            self.rsi_period = 12
             self.rsi_overbought = 75
             self.rsi_oversold = 25
-            self.ema_period = 100
-            self.atr_period = 20
-            self.atr_multiple = 2.5
-            self.position_max_candles = 10
+            self.ema_period = 50
+            self.atr_period = 14
+            self.atr_multiple = 1.5  # Still tighter stops for intraday
+            self.position_max_candles = 8
+            self.use_close_price_filter = True
+            self.profit_target_pct = 0.01  # 1% target
             
         else:  # 4h, daily - slower settings
             self.rsi_period = 14
@@ -54,8 +58,10 @@ class RsiStrategy(BaseStrategy):
             self.rsi_oversold = 20
             self.ema_period = 200
             self.atr_period = 30
-            self.atr_multiple = 3.0
+            self.atr_multiple = 2.5
             self.position_max_candles = 5
+            self.use_close_price_filter = False
+            self.profit_target_pct = 0.02  # 2% target
     
     def update_timeframe(self, timeframe: str):
         """Update the strategy timeframe and adjust parameters."""
@@ -79,6 +85,12 @@ class RsiStrategy(BaseStrategy):
             
             # Calculate ATR for volatility-based stops
             df['atr'] = calculate_atr(df, self.atr_period)
+            
+            # Add previous RSI for momentum checks
+            df['prev_rsi'] = df['rsi'].shift(1)
+            
+            # Calculate price rate of change for additional filter
+            df['price_rate_of_change'] = (df['close'] - df['close'].shift(3)) / df['close'].shift(3) * 100
             
             return df
         except Exception as e:
@@ -108,65 +120,107 @@ class RsiStrategy(BaseStrategy):
         # RSI conditions
         rsi_oversold = last['rsi'] < self.rsi_oversold
         rsi_overbought = last['rsi'] > self.rsi_overbought
-        rsi_rising = last['rsi'] > prev['rsi']
-        rsi_falling = last['rsi'] < prev['rsi']
+        rsi_rising = last['rsi'] > last['prev_rsi']
+        rsi_falling = last['rsi'] < last['prev_rsi']
         
         # RSI reversal conditions
         oversold_reversal = rsi_oversold and rsi_rising
         overbought_reversal = rsi_overbought and rsi_falling
         
+        # Price momentum for day trading
+        price_momentum_up = last['price_rate_of_change'] > 0
+        price_momentum_down = last['price_rate_of_change'] < 0
+        
         # Long signal: RSI oversold and rising, price above EMA (bullish trend)
-        long_condition = oversold_reversal and price_above_ema
+        # For day trading, add momentum as a condition
+        long_condition = (oversold_reversal and price_above_ema) or (price_above_ema and rsi_rising and price_momentum_up and last['rsi'] < 40)
         
         # Short signal: RSI overbought and falling, price below EMA (bearish trend)
-        short_condition = overbought_reversal and price_below_ema
+        # For day trading, add momentum as a condition
+        short_condition = (overbought_reversal and price_below_ema) or (price_below_ema and rsi_falling and price_momentum_down and last['rsi'] > 60)
         
         if long_condition:
-            long_signals.append(f"RSI({self.rsi_period}) oversold and rising ({last['rsi']:.2f} < {self.rsi_oversold})")
+            if oversold_reversal:
+                long_signals.append(f"RSI({self.rsi_period}) oversold and rising ({last['rsi']:.2f} < {self.rsi_oversold})")
+            else:
+                long_signals.append(f"RSI({self.rsi_period}) rising and below 40 ({last['rsi']:.2f})")
+                
             long_signals.append(f"Price above EMA({self.ema_period}): {last['close']:.2f} > {last['ema']:.2f}")
+            
+            if price_momentum_up:
+                long_signals.append(f"Price momentum up: {last['price_rate_of_change']:.2f}%")
         else:
-            if not oversold_reversal:
+            if not oversold_reversal and not (rsi_rising and last['rsi'] < 40):
                 fail_reasons.append(f"RSI({self.rsi_period}) not oversold or not rising: {last['rsi']:.2f}")
             if not price_above_ema:
                 fail_reasons.append(f"Price not above EMA({self.ema_period}): {last['close']:.2f} < {last['ema']:.2f}")
+            if not price_momentum_up and not oversold_reversal:
+                fail_reasons.append(f"No upward price momentum: {last['price_rate_of_change']:.2f}%")
         
         if short_condition:
-            short_signals.append(f"RSI({self.rsi_period}) overbought and falling ({last['rsi']:.2f} > {self.rsi_overbought})")
+            if overbought_reversal:
+                short_signals.append(f"RSI({self.rsi_period}) overbought and falling ({last['rsi']:.2f} > {self.rsi_overbought})")
+            else:
+                short_signals.append(f"RSI({self.rsi_period}) falling and above 60 ({last['rsi']:.2f})")
+                
             short_signals.append(f"Price below EMA({self.ema_period}): {last['close']:.2f} < {last['ema']:.2f}")
+            
+            if price_momentum_down:
+                short_signals.append(f"Price momentum down: {last['price_rate_of_change']:.2f}%")
         else:
-            if not overbought_reversal:
+            if not overbought_reversal and not (rsi_falling and last['rsi'] > 60):
                 fail_reasons.append(f"RSI({self.rsi_period}) not overbought or not falling: {last['rsi']:.2f}")
             if not price_below_ema:
                 fail_reasons.append(f"Price not below EMA({self.ema_period}): {last['close']:.2f} > {last['ema']:.2f}")
+            if not price_momentum_down and not overbought_reversal:
+                fail_reasons.append(f"No downward price momentum: {last['price_rate_of_change']:.2f}%")
         
         # Exit conditions
         close_condition = False
         if position:
-            # Calculate stop and target based on ATR
-            atr_value = last['atr']
+            # Take profit level for day trading
+            take_profit_pct = self.profit_target_pct
             
             if position.side == 'long':
+                take_profit = position.entry * (1 + take_profit_pct)
+                
                 # Exit long if RSI becomes overbought or price falls below EMA
                 if position.trailing_stop and last['close'] <= position.trailing_stop:
                     close_signals.append(f"Stop loss hit at {position.trailing_stop:.2f}")
                     close_condition = True
+                elif last['close'] >= take_profit:
+                    close_signals.append(f"Take profit reached: {last['close']:.2f} >= {take_profit:.2f}")
+                    close_condition = True
                 elif overbought_reversal:
                     close_signals.append(f"RSI overbought and falling ({last['rsi']:.2f} > {self.rsi_overbought})")
                     close_condition = True
-                elif price_below_ema and not rsi_oversold:
+                elif self.use_close_price_filter and price_below_ema and not rsi_oversold:
                     close_signals.append(f"Price fell below EMA({self.ema_period}): {last['close']:.2f} < {last['ema']:.2f}")
+                    close_condition = True
+                # Additional day trading exit - RSI momentum shift
+                elif self.use_close_price_filter and price_momentum_down and rsi_falling and last['rsi'] > 50:
+                    close_signals.append(f"RSI momentum shifting down from above 50: {last['rsi']:.2f}")
                     close_condition = True
             
             elif position.side == 'short':
+                take_profit = position.entry * (1 - take_profit_pct)
+                
                 # Exit short if RSI becomes oversold or price rises above EMA
                 if position.trailing_stop and last['close'] >= position.trailing_stop:
                     close_signals.append(f"Stop loss hit at {position.trailing_stop:.2f}")
                     close_condition = True
+                elif last['close'] <= take_profit:
+                    close_signals.append(f"Take profit reached: {last['close']:.2f} <= {take_profit:.2f}")
+                    close_condition = True
                 elif oversold_reversal:
                     close_signals.append(f"RSI oversold and rising ({last['rsi']:.2f} < {self.rsi_oversold})")
                     close_condition = True
-                elif price_above_ema and not rsi_overbought:
+                elif self.use_close_price_filter and price_above_ema and not rsi_overbought:
                     close_signals.append(f"Price rose above EMA({self.ema_period}): {last['close']:.2f} > {last['ema']:.2f}")
+                    close_condition = True
+                # Additional day trading exit - RSI momentum shift
+                elif self.use_close_price_filter and price_momentum_up and rsi_rising and last['rsi'] < 50:
+                    close_signals.append(f"RSI momentum shifting up from below 50: {last['rsi']:.2f}")
                     close_condition = True
         
         long_signal = long_condition and not position
@@ -188,7 +242,7 @@ class RsiStrategy(BaseStrategy):
         
         # Initialize if first check of this position
         if not position.trailing_stop:
-            # Calculate initial stop-loss based on ATR
+            # Calculate initial stop-loss based on ATR - tighter for day trading
             atr_value = last['atr']
             
             if position.side == 'long':
@@ -202,11 +256,16 @@ class RsiStrategy(BaseStrategy):
             # Increment candle counter
             position.open_candles += 1
         
-        # Update trailing stop based on price movement
+        # Update trailing stop based on price movement - more aggressive for day trading
         atr_value = last['atr']
-        trailing_atr = self.atr_multiple * 0.75  # Use a tighter trailing factor
+        trailing_atr = self.atr_multiple * 0.6  # Use an even tighter trailing factor for day trading
         
         if position.side == 'long':
+            # For day trading, move to breakeven quickly
+            if position.open_candles >= 2 and last['close'] > position.entry and position.trailing_stop < position.entry:
+                position.trailing_stop = position.entry
+                close_signals.append("Moved stop-loss to breakeven after 2 candles")
+                
             # Calculate potential new stop level based on ATR
             potential_stop = last['close'] - (atr_value * trailing_atr)
             
@@ -216,6 +275,11 @@ class RsiStrategy(BaseStrategy):
                 close_signals.append(f"Raised stop to {potential_stop:.2f}")
         
         elif position.side == 'short':
+            # For day trading, move to breakeven quickly
+            if position.open_candles >= 2 and last['close'] < position.entry and position.trailing_stop > position.entry:
+                position.trailing_stop = position.entry
+                close_signals.append("Moved stop-loss to breakeven after 2 candles")
+                
             # Calculate potential new stop level based on ATR
             potential_stop = last['close'] + (atr_value * trailing_atr)
             
@@ -224,7 +288,7 @@ class RsiStrategy(BaseStrategy):
                 position.trailing_stop = potential_stop
                 close_signals.append(f"Lowered stop to {potential_stop:.2f}")
         
-        # Time-based exit
+        # Quicker time-based exit for day trading
         if position.open_candles > self.position_max_candles:
             close_signals.append(f"Position time limit reached ({position.open_candles} candles)")
             close_condition = True

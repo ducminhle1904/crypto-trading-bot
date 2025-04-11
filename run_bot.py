@@ -9,6 +9,8 @@ import argparse
 from trading_bot.main import TradingBot
 from trading_bot.strategies.ema_trend_strategy import EmaTrendStrategy
 from trading_bot.strategies.rsi_strategy import RsiStrategy
+from trading_bot.strategies.bollinger_squeeze_strategy import BollingerSqueezeStrategy
+from trading_bot.strategies.vwap_stoch_strategy import VwapStochStrategy
 from trading_bot.config import DEFAULT_SYMBOL, DEFAULT_TIMEFRAME, DEFAULT_LIMIT
 
 
@@ -30,6 +32,13 @@ async def run_bot(symbol, timeframe, limit, strategies):
     if 'rsi' in strategies or 'all' in strategies:
         bot.add_strategy(RsiStrategy(timeframe=timeframe))
     
+    # Add new scalping strategies
+    if 'squeeze' in strategies or 'all' in strategies:
+        bot.add_strategy(BollingerSqueezeStrategy(timeframe=timeframe))
+    
+    if 'vwap' in strategies or 'all' in strategies:
+        bot.add_strategy(VwapStochStrategy(timeframe=timeframe))
+    
     # Run the bot
     await bot.run(symbol, timeframe, limit)
 
@@ -43,7 +52,7 @@ if __name__ == "__main__":
     parser.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
                         help=f'Number of candles to fetch (default: {DEFAULT_LIMIT})')
     parser.add_argument('--strategies', type=str, default='all',
-                        help='Strategies to run (comma-separated): ema,rsi,all (default: all)')
+                        help='Strategies to run (comma-separated): ema,rsi,squeeze,vwap,all (default: all)')
     
     args = parser.parse_args()
     strategies = args.strategies.lower().split(',')

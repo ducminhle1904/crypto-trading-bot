@@ -30,27 +30,31 @@ class EmaTrendStrategy(BaseStrategy):
         minutes = self.timeframe_minutes
         
         # Scale parameters based on timeframe
-        if minutes <= 5:  # 1m to 5m - faster settings
-            self.ema_short = 21
-            self.ema_long = 55
-            self.trend_window = 40
-            self.rsi_period = 7
+        if minutes <= 5:  # 1m to 5m - faster settings for scalping/day trading
+            self.ema_short = 9  # Faster EMA for short-term moves
+            self.ema_long = 21  # Shorter long EMA for day trading
+            self.trend_window = 20  # Shorter trend window for faster signals
+            self.rsi_period = 7   # More responsive RSI
             self.atr_period = 10
             self.momentum_period = 3
-            self.position_max_candles = 10
-            self.profit_target_pct = 0.01  # 1%
-            self.stop_loss_pct = 0.0075   # 0.75%
+            self.position_max_candles = 8  # Quicker exits for scalping
+            self.profit_target_pct = 0.005  # 0.5% target for scalping
+            self.stop_loss_pct = 0.004  # Tighter 0.4% stop loss
+            self.rsi_overbought = 75  # Tighter RSI bounds
+            self.rsi_oversold = 25
             
         elif minutes <= 60:  # 15m to 1h - medium settings
-            self.ema_short = 21
-            self.ema_long = 50
-            self.trend_window = 30
-            self.rsi_period = 14
+            self.ema_short = 13
+            self.ema_long = 34
+            self.trend_window = 24
+            self.rsi_period = 10
             self.atr_period = 14
             self.momentum_period = 4
-            self.position_max_candles = 8
-            self.profit_target_pct = 0.015  # 1.5%
-            self.stop_loss_pct = 0.01  # 1%
+            self.position_max_candles = 6  # Still fast exits for day trading
+            self.profit_target_pct = 0.008  # 0.8% - still quick profit target
+            self.stop_loss_pct = 0.006  # Tighter stop than original
+            self.rsi_overbought = 75
+            self.rsi_oversold = 25
             
         else:  # 4h, daily - slower settings
             self.ema_short = 18
@@ -62,6 +66,8 @@ class EmaTrendStrategy(BaseStrategy):
             self.position_max_candles = 5
             self.profit_target_pct = 0.025  # 2.5%
             self.stop_loss_pct = 0.015  # 1.5%
+            self.rsi_overbought = 70
+            self.rsi_oversold = 30
     
     def update_timeframe(self, timeframe: str):
         """Update the strategy timeframe and adjust parameters."""
@@ -107,18 +113,23 @@ class EmaTrendStrategy(BaseStrategy):
         # Confirmation indicators
         momentum_bullish = last['momentum'] > 0
         momentum_bearish = last['momentum'] < 0
-        rsi_oversold = last['fast_rsi'] < 30
-        rsi_overbought = last['fast_rsi'] > 70
+        rsi_oversold = last['fast_rsi'] < self.rsi_oversold  # Use adaptive RSI levels
+        rsi_overbought = last['fast_rsi'] > self.rsi_overbought
+        
+        # Scalping-specific conditions
+        ema_crossover_bull = last['ema_short'] > last['ema_long'] and prev['ema_short'] <= prev['ema_long']
+        ema_crossover_bear = last['ema_short'] < last['ema_long'] and prev['ema_short'] >= prev['ema_long']
         
         # Dynamic risk based on volatility
         volatility_factor = last['atr'] / last['close'] * 100  # ATR as percentage of price
         
-        # Enhanced signal conditions
-        long_confirmation = momentum_bullish or rsi_oversold
-        long_condition = trend_up and ema_bullish and long_confirmation
+        # Enhanced signal conditions for day trading
+        # For day trading, make the EMA crossover more important for faster entries
+        long_confirmation = momentum_bullish or rsi_oversold or ema_crossover_bull
+        long_condition = (trend_up and ema_bullish and long_confirmation)
         
-        short_confirmation = momentum_bearish or rsi_overbought
-        short_condition = trend_down and ema_bearish and short_confirmation
+        short_confirmation = momentum_bearish or rsi_overbought or ema_crossover_bear
+        short_condition = (trend_down and ema_bearish and short_confirmation)
         
         if long_condition:
             long_signals.append("Trendline slope positive")
@@ -129,6 +140,8 @@ class EmaTrendStrategy(BaseStrategy):
                 long_signals.append(f"Bullish momentum: {last['momentum']:.2f}%")
             if rsi_oversold:
                 long_signals.append(f"Oversold RSI: {last['fast_rsi']:.2f}")
+            if ema_crossover_bull:
+                long_signals.append(f"EMA crossover: Short EMA crossed above Long EMA")
         else:
             if not trend_up:
                 long_fail_reasons.append(f"No trend up: Slope ({last['trend_slope']:.2f})")
@@ -146,6 +159,8 @@ class EmaTrendStrategy(BaseStrategy):
                 short_signals.append(f"Bearish momentum: {last['momentum']:.2f}%")
             if rsi_overbought:
                 short_signals.append(f"Overbought RSI: {last['fast_rsi']:.2f}")
+            if ema_crossover_bear:
+                short_signals.append(f"EMA crossover: Short EMA crossed below Long EMA")
         else:
             if not trend_down:
                 short_fail_reasons.append(f"No trend down: Slope ({last['trend_slope']:.2f})")
@@ -156,9 +171,9 @@ class EmaTrendStrategy(BaseStrategy):
         
         close_condition = False
         if position:
-            # Dynamic stop-loss and take-profit based on volatility
-            stop_loss_pct = max(self.stop_loss_pct * 0.67, min(self.stop_loss_pct, volatility_factor * 0.75))
-            take_profit_pct = max(self.profit_target_pct * 0.67, min(self.profit_target_pct * 1.5, volatility_factor * 1.5))
+            # Dynamic stop-loss and take-profit based on volatility - tighter for scalping
+            stop_loss_pct = max(self.stop_loss_pct * 0.67, min(self.stop_loss_pct, volatility_factor * 0.5))  # Even tighter stops for day trading
+            take_profit_pct = max(self.profit_target_pct * 0.67, min(self.profit_target_pct * 1.2, volatility_factor * 1.0))  # Quicker profit taking
             
             if position.side == 'long':
                 # Check if trailing stop exists, otherwise use initial stop loss
@@ -168,7 +183,8 @@ class EmaTrendStrategy(BaseStrategy):
                     stop_loss = position.entry * (1 - stop_loss_pct)
                     
                 take_profit = position.entry * (1 + take_profit_pct)
-                reversal = trend_down or ema_bearish
+                # Quicker exits for day trading - include EMA crossovers
+                reversal = trend_down or ema_bearish or ema_crossover_bear
                 
                 if last['close'] <= stop_loss:
                     close_signals.append("Stop Loss Hit")
@@ -189,7 +205,8 @@ class EmaTrendStrategy(BaseStrategy):
                     stop_loss = position.entry * (1 + stop_loss_pct)
                     
                 take_profit = position.entry * (1 - take_profit_pct)
-                reversal = trend_up or ema_bullish
+                # Quicker exits for day trading - include EMA crossovers
+                reversal = trend_up or ema_bullish or ema_crossover_bull
                 
                 if last['close'] >= stop_loss:
                     close_signals.append("Stop Loss Hit")
@@ -228,9 +245,9 @@ class EmaTrendStrategy(BaseStrategy):
         
         # Initialize if first check of this position
         if not position.trailing_stop:
-            # Calculate initial stop-loss based on volatility
+            # Calculate initial stop-loss based on volatility - tighter for day trading
             volatility_pct = last['atr'] / last['close'] * 100 if 'atr' in last else 0.5
-            stop_loss_pct = max(self.stop_loss_pct * 0.67, min(self.stop_loss_pct, volatility_pct * 0.75))
+            stop_loss_pct = max(self.stop_loss_pct * 0.67, min(self.stop_loss_pct, volatility_pct * 0.5))
             
             if position.side == 'long':
                 position.trailing_stop = position.entry * (1 - stop_loss_pct)
@@ -242,14 +259,14 @@ class EmaTrendStrategy(BaseStrategy):
             # Increment candle counter
             position.open_candles += 1
         
-        # Implement quick trailing stop activation (scaled based on timeframe)
-        breakeven_threshold = 0.003  # Default 0.3% for 3m
+        # Implement quick trailing stop activation - even more aggressive for day trading
+        breakeven_threshold = 0.002  # For day trading, move to breakeven at just 0.2%
         if self.timeframe_minutes > 60:
-            breakeven_threshold = 0.005  # 0.5% for 4h+
+            breakeven_threshold = 0.004  # 0.4% for 4h+
         elif self.timeframe_minutes > 5:
-            breakeven_threshold = 0.004  # 0.4% for 15m-1h
+            breakeven_threshold = 0.003  # 0.3% for 15m-1h
             
-        trailing_threshold = breakeven_threshold * 2  # Double the breakeven for trailing
+        trailing_threshold = breakeven_threshold * 1.5  # 1.5x the breakeven for trailing (more aggressive)
             
         if position.side == 'long':
             breakeven_level = position.entry * (1 + breakeven_threshold)
@@ -260,7 +277,7 @@ class EmaTrendStrategy(BaseStrategy):
                 close_signals.append("Moved stop-loss to breakeven")
             # More aggressive trailing as profit increases
             elif last['close'] > position.entry * (1 + trailing_threshold):
-                potential_stop = max(position.entry, last['close'] * (1 - breakeven_threshold))
+                potential_stop = max(position.entry, last['close'] * (1 - breakeven_threshold * 0.75))  # Even tighter trailing
                 if potential_stop > position.trailing_stop:
                     position.trailing_stop = potential_stop
                     close_signals.append(f"Updated trailing stop to {potential_stop:.2f}")
@@ -274,12 +291,12 @@ class EmaTrendStrategy(BaseStrategy):
                 close_signals.append("Moved stop-loss to breakeven")
             # More aggressive trailing as profit increases
             elif last['close'] < position.entry * (1 - trailing_threshold):
-                potential_stop = min(position.entry, last['close'] * (1 + breakeven_threshold))
+                potential_stop = min(position.entry, last['close'] * (1 + breakeven_threshold * 0.75))  # Even tighter trailing
                 if potential_stop < position.trailing_stop:
                     position.trailing_stop = potential_stop
                     close_signals.append(f"Updated trailing stop to {potential_stop:.2f}")
         
-        # Time-based exit (scaled by timeframe)
+        # Quicker time-based exit for scalping
         if position.open_candles > self.position_max_candles:
             close_signals.append(f"Position time limit reached ({position.open_candles} candles)")
             close_condition = True
