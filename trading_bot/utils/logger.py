@@ -210,4 +210,127 @@ async def send_telegram_message(message: str, retries: int = 0) -> bool:
 async def send_performance_report(strategies: Optional[List[str]] = None):
     """Generate and send performance report via Telegram"""
     report = await generate_performance_report(strategies)
-    return await send_telegram_message(report) 
+    return await send_telegram_message(report)
+
+def load_previous_trades():
+    """
+    Load previous trades from the CSV file when restarting the bot.
+    Returns a dictionary with the following information:
+    - trades: Dictionary mapping strategy names to lists of trade results (profit percentages)
+    - positions: Dictionary mapping strategy names to the last open position (if any)
+    - balances: Dictionary mapping strategy names to the current balance
+    - trade_id: The next trade ID to use
+    """
+    trades = defaultdict(list)
+    positions = {}
+    balances = defaultdict(lambda: 1000.0)  # Default starting balance
+    trade_id = 1
+    
+    try:
+        if not os.path.exists(SUMMARY_LOG_FILE):
+            logger.info(f"No previous trade summary file found at {SUMMARY_LOG_FILE}")
+            return {
+                'trades': dict(trades),
+                'positions': positions,
+                'balances': dict(balances),
+                'trade_id': trade_id
+            }
+        
+        # Open positions tracking (to find the latest status of each open trade)
+        open_positions = {}  # {trade_id: position_data}
+        
+        with open(SUMMARY_LOG_FILE, mode='r', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Skip rows with missing critical data
+                if not row.get('timestamp') or not row.get('action'):
+                    continue
+                
+                # Get the strategy name, defaulting to 'unknown'
+                strategy = row.get('strategy', 'unknown')
+                
+                # Parse trade_id and update the next available ID
+                if row.get('trade_id') and row['trade_id'].isdigit():
+                    current_trade_id = int(row['trade_id'])
+                    trade_id = max(trade_id, current_trade_id + 1)
+                
+                # Track trades and balances
+                if row['action'] == 'EXIT':
+                    # Add the trade result to the strategy's trade history
+                    if row.get('profit_percent') and row['profit_percent']:
+                        try:
+                            profit_pct = float(row['profit_percent'])
+                            trades[strategy].append(profit_pct)
+                        except ValueError:
+                            pass
+                    
+                    # Update the balance
+                    if row.get('balance') and row['balance']:
+                        try:
+                            balances[strategy] = float(row['balance'])
+                        except ValueError:
+                            pass
+                    
+                    # Remove the closed position from open positions
+                    if row.get('trade_id') in open_positions:
+                        del open_positions[row['trade_id']]
+                
+                elif row['action'] == 'ENTRY':
+                    # Track the open position
+                    try:
+                        # Parse the entry price and timestamp
+                        entry_price = float(row['entry_price']) if row.get('entry_price') else float(row['price'])
+                        timestamp = datetime.strptime(row['timestamp'], "%Y-%m-%d %H:%M:%S")
+                        
+                        # Create a position object for tracking
+                        position_data = {
+                            'side': row['side'].lower(),
+                            'entry': entry_price,
+                            'size': float(row['size']) if row.get('size') else 0.0,
+                            'open_time': timestamp,
+                            'trade_id': int(row['trade_id']) if row['trade_id'].isdigit() else 1,
+                            'strategy_name': strategy,
+                            'signals': row.get('signals', '')
+                        }
+                        
+                        open_positions[row['trade_id']] = position_data
+                    except (ValueError, KeyError) as e:
+                        logger.warning(f"Error parsing position data: {e}")
+                
+                # For UPDATE actions, we just want to keep track of the latest balance
+                elif row['action'] == 'UPDATE':
+                    if row.get('balance') and row['balance']:
+                        try:
+                            balances[strategy] = float(row['balance'])
+                        except ValueError:
+                            pass
+        
+        # Convert open positions to the format needed by the bot
+        for trade_id, position_data in open_positions.items():
+            # Make sure the position contains the minimum required data
+            if all(k in position_data for k in ['side', 'entry', 'size', 'open_time', 'trade_id', 'strategy_name']):
+                positions[position_data['strategy_name']] = position_data
+            else:
+                logger.warning(f"Skipped incomplete position data for trade ID {trade_id}")
+        
+        # Only log if there's actual data
+        if trades or positions:
+            logger.info(f"Loaded trading history from {SUMMARY_LOG_FILE}: {len(trades)} strategies, "
+                       f"{sum(len(t) for t in trades.values())} completed trades, "
+                       f"{len(positions)} open positions")
+        
+        return {
+            'trades': dict(trades),
+            'positions': positions,
+            'balances': dict(balances),
+            'trade_id': trade_id
+        }
+    
+    except Exception as e:
+        logger.error(f"Error loading previous trades: {e}")
+        return {
+            'trades': dict(trades),
+            'positions': positions,
+            'balances': dict(balances),
+            'trade_id': trade_id
+        } 

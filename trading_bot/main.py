@@ -14,7 +14,10 @@ from trading_bot.exchange_client import ExchangeClient
 from trading_bot.strategies.base_strategy import BaseStrategy
 from trading_bot.strategies.ema_trend_strategy import EmaTrendStrategy
 from trading_bot.strategies.rsi_strategy import RsiStrategy
-from trading_bot.utils.logger import setup_summary_logger, log_trade_summary, send_telegram_message
+from trading_bot.utils.logger import (
+    setup_summary_logger, log_trade_summary, send_telegram_message,
+    load_performance_metrics, load_previous_trades
+)
 from trading_bot.models import Position
 from trading_bot.backtester import backtest_strategy
 
@@ -60,7 +63,62 @@ class TradingBot:
         if not self.strategies:
             self.add_strategy(EmaTrendStrategy(timeframe=self.timeframe))
             self.add_strategy(RsiStrategy(timeframe=self.timeframe))
-            
+        
+        # Load performance metrics
+        load_performance_metrics()
+        
+        # Load previous trades from CSV file
+        previous_data = load_previous_trades()
+        
+        # Show loaded trade statistics
+        for strategy_name, trade_list in previous_data['trades'].items():
+            if trade_list:
+                logger.info(f"Loaded {len(trade_list)} previous trades for {strategy_name}")
+                
+                # Only restore data for strategies that are currently active
+                if strategy_name in self.strategies:
+                    self.trades[strategy_name] = trade_list
+                    
+                    # Restore balance if available
+                    if strategy_name in previous_data['balances']:
+                        self.balances[strategy_name] = previous_data['balances'][strategy_name]
+                        logger.info(f"Restored balance for {strategy_name}: ${self.balances[strategy_name]:.2f}")
+        
+        # Restore open positions if any
+        for strategy_name, position_data in previous_data['positions'].items():
+            if strategy_name in self.strategies:
+                try:
+                    # Convert the position data to a Position object
+                    position = Position(
+                        side=position_data['side'],
+                        entry=position_data['entry'],
+                        size=position_data['size'],
+                        open_time=position_data['open_time'],
+                        trade_id=position_data['trade_id'],
+                        strategy_name=strategy_name
+                    )
+                    
+                    # Set trailing_stop if it exists
+                    if 'trailing_stop' in position_data:
+                        position.trailing_stop = position_data['trailing_stop']
+                    
+                    # Set open_candles if it exists
+                    if 'open_candles' in position_data:
+                        position.open_candles = position_data['open_candles']
+                    else:
+                        position.open_candles = 0  # Default value
+                    
+                    self.positions[strategy_name] = position
+                    logger.info(f"Restored open {position.side} position for {strategy_name} at price {position.entry:.2f} from previous session")
+                except Exception as e:
+                    logger.error(f"Failed to restore position for {strategy_name}: {str(e)}")
+                    self.positions[strategy_name] = None
+        
+        # Update the trade ID counter
+        if previous_data['trade_id'] > self.trade_id:
+            self.trade_id = previous_data['trade_id']
+            logger.info(f"Resumed trade ID counter at {self.trade_id}")
+        
         logger.info(f"Trading bot fully initialized with {len(self.strategies)} strategies")
         return self
     
@@ -132,6 +190,15 @@ class TradingBot:
             # Handle position management if we have one
             additional_close_signal = False
             if position:
+                # Make sure restored positions have necessary attributes
+                if not hasattr(position, 'trailing_stop') or position.trailing_stop is None:
+                    logger.info(f"Setting initial trailing stop for restored position in {strategy_name}")
+                    # We'll let the strategy's manage_position method set the trailing stop
+                
+                if not hasattr(position, 'open_candles'):
+                    position.open_candles = 0
+                
+                # Manage the position normally
                 position, additional_close_signal, additional_signals = await strategy.manage_position(
                     df_with_indicators, position, balance
                 )
@@ -333,13 +400,36 @@ class TradingBot:
             # Use provided timeframe or default to the one set in the constructor
             if timeframe and timeframe != self.timeframe:
                 self.update_timeframe(timeframe)
-                
-            # Send startup message
-            await send_telegram_message(
+            
+            # Prepare startup message with information about restored data
+            has_restored_data = any(len(trades) > 0 for trades in self.trades.values())
+            has_open_positions = any(position is not None for position in self.positions.values())
+            
+            startup_message = (
                 f"🤖 <b>Multi-Strategy Trading Bot Started</b>\n"
                 f"Monitoring {symbol} on {self.timeframe} timeframe\n"
                 f"Strategies: {', '.join(self.strategies.keys())}"
             )
+            
+            # Add information about restored data if applicable
+            if has_restored_data or has_open_positions:
+                startup_message += "\n\n<b>Restored from previous session:</b>"
+                
+                if has_restored_data:
+                    total_trades = sum(len(trades) for trades in self.trades.values())
+                    startup_message += f"\n✅ {total_trades} historical trades"
+                
+                if has_open_positions:
+                    open_positions_count = sum(1 for p in self.positions.values() if p is not None)
+                    open_positions_info = [
+                        f"{strategy}: {position.side.upper()}" 
+                        for strategy, position in self.positions.items() 
+                        if position is not None
+                    ]
+                    startup_message += f"\n🔄 {open_positions_count} open positions: {', '.join(open_positions_info)}"
+            
+            # Send startup message
+            await send_telegram_message(startup_message)
             
             # Run backtest to evaluate strategies
             await self.backtest_all_strategies(symbol, self.timeframe, limit)

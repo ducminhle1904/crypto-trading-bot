@@ -19,6 +19,12 @@ async def run_bot(symbol, timeframe, limit, strategies):
     # Initialize bot with the specified timeframe
     bot = await TradingBot(timeframe=timeframe).initialize()
     
+    # Save any restored positions, balances and trades before clearing
+    restored_positions = dict(bot.positions)
+    restored_balances = dict(bot.balances)
+    restored_trades = dict(bot.trades)
+    trade_id = bot.trade_id
+    
     # Clear default strategies
     bot.strategies.clear()
     bot.positions.clear()
@@ -38,6 +44,23 @@ async def run_bot(symbol, timeframe, limit, strategies):
     
     if 'vwap' in strategies or 'all' in strategies:
         bot.add_strategy(VwapStochStrategy(timeframe=timeframe))
+    
+    # Restore positions, balances and trades for strategies that were re-added
+    for strategy_name, strategy in bot.strategies.items():
+        # Restore trades history if available
+        if strategy_name in restored_trades:
+            bot.trades[strategy_name] = restored_trades[strategy_name]
+            
+        # Restore balance if available
+        if strategy_name in restored_balances:
+            bot.balances[strategy_name] = restored_balances[strategy_name]
+            
+        # Restore position if available
+        if strategy_name in restored_positions and restored_positions[strategy_name] is not None:
+            bot.positions[strategy_name] = restored_positions[strategy_name]
+    
+    # Restore trade ID counter
+    bot.trade_id = trade_id
     
     # Run the bot
     await bot.run(symbol, timeframe, limit)
@@ -68,6 +91,7 @@ if __name__ == "__main__":
     print(f"Starting trading bot with {args.timeframe} timeframe")
     print(f"Symbol: {args.symbol}")
     print(f"Strategies: {', '.join(strategies)}")
+    print(f"Note: The bot will automatically restore previous trading data from CSV if available")
     
     try:
         asyncio.run(run_bot(args.symbol, args.timeframe, args.limit, strategies))
