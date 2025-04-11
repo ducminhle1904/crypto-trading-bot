@@ -7,6 +7,7 @@ from typing import Tuple, List, Optional, Dict, Any
 from trading_bot.strategies.base_strategy import BaseStrategy
 from trading_bot.models import Position
 from trading_bot.utils.indicators import apply_bollinger_squeeze_indicators
+from trading_bot.utils.position_manager import TrailingProfitManager
 from trading_bot.config import logger
 
 
@@ -15,18 +16,23 @@ class BollingerSqueezeStrategy(BaseStrategy):
     Bollinger Squeeze Strategy identifies consolidation patterns followed by volatility expansions.
     Perfect for scalping as it catches explosive moves after periods of low volatility.
     Combined with RSI Divergence for confirmation and improved entry timing.
+    Now with trailing profit to let winning trades run longer.
     """
     
-    def __init__(self, timeframe: str = "3m"):
+    def __init__(self, timeframe: str = "3m", use_trailing_profit: bool = True):
         """Initialize the strategy with parameters."""
         super().__init__(name="bollinger_squeeze_strategy", timeframe=timeframe)
         
         # Set parameters based on timeframe
         self._set_parameters_for_timeframe()
         
+        # Initialize trailing profit manager
+        self.trailing_profit_manager = TrailingProfitManager(enable_trailing_profit=use_trailing_profit)
+        self.use_trailing_profit = use_trailing_profit
+        
         logger.info(f"Initialized Bollinger Squeeze Strategy with parameters: BB Length={self.bb_length}, "
                    f"KC Length={self.keltner_length}, MACD Fast={self.macd_fast}, MACD Slow={self.macd_slow}, "
-                   f"RSI Period={self.rsi_period}")
+                   f"RSI Period={self.rsi_period}, Trailing Profit={use_trailing_profit}")
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
@@ -219,56 +225,61 @@ class BollingerSqueezeStrategy(BaseStrategy):
             if not (bearish_divergence or rsi_overbought):
                 fail_reasons.append(f"No RSI confirmation: No bearish divergence and RSI not overbought ({rsi_value:.2f})")
         
-        # Exit conditions - important for quick exits in scalping
+        # Exit conditions - now with trailing profit
         close_condition = False
         if position:
-            take_profit_pct = self.profit_target_pct
-            
-            if position.side == 'long':
-                take_profit = position.entry * (1 + take_profit_pct)
+            # For standard strategy (fixed take profit)
+            if not self.use_trailing_profit:
+                take_profit_pct = self.profit_target_pct
                 
-                # Exit long if we hit stops or targets
-                if position.trailing_stop and last['close'] <= position.trailing_stop:
-                    close_signals.append(f"Stop loss hit at {position.trailing_stop:.2f}")
-                    close_condition = True
-                # Take profit for scalping
-                elif last['close'] >= take_profit:
-                    close_signals.append(f"Take profit hit: {last['close']:.2f} >= {take_profit:.2f}")
-                    close_condition = True
-                # Exit if we get MACD cross or close below middle band
-                elif macd_cross_down:
-                    close_signals.append(f"MACD crossed below signal line: {last['macd']:.4f} < {last['macd_signal']:.4f}")
-                    close_condition = True
-                elif last['close'] < last['bb_middle']:
-                    close_signals.append(f"Price fell below BB middle band: {last['close']:.2f} < {last['bb_middle']:.2f}")
-                    close_condition = True
-                # Add exit on bearish divergence
-                elif bearish_divergence:
-                    close_signals.append(f"Bearish RSI divergence detected while in long position")
-                    close_condition = True
-            
-            elif position.side == 'short':
-                take_profit = position.entry * (1 - take_profit_pct)
+                if position.side == 'long':
+                    take_profit = position.entry * (1 + take_profit_pct)
+                    
+                    # Exit long if we hit stops or targets
+                    if position.trailing_stop and last['close'] <= position.trailing_stop:
+                        close_signals.append(f"Stop loss hit at {position.trailing_stop:.2f}")
+                        close_condition = True
+                    # Take profit for scalping
+                    elif last['close'] >= take_profit:
+                        close_signals.append(f"Take profit hit: {last['close']:.2f} >= {take_profit:.2f}")
+                        close_condition = True
+                    # Exit if we get MACD cross or close below middle band
+                    elif macd_cross_down:
+                        close_signals.append(f"MACD crossed below signal line: {last['macd']:.4f} < {last['macd_signal']:.4f}")
+                        close_condition = True
+                    elif last['close'] < last['bb_middle']:
+                        close_signals.append(f"Price fell below BB middle band: {last['close']:.2f} < {last['bb_middle']:.2f}")
+                        close_condition = True
+                    # Add exit on bearish divergence
+                    elif bearish_divergence:
+                        close_signals.append(f"Bearish RSI divergence detected while in long position")
+                        close_condition = True
                 
-                # Exit short if we hit stops or targets
-                if position.trailing_stop and last['close'] >= position.trailing_stop:
-                    close_signals.append(f"Stop loss hit at {position.trailing_stop:.2f}")
-                    close_condition = True
-                # Take profit for scalping
-                elif last['close'] <= take_profit:
-                    close_signals.append(f"Take profit hit: {last['close']:.2f} <= {take_profit:.2f}")
-                    close_condition = True
-                # Exit if we get MACD cross or close above middle band
-                elif macd_cross_up:
-                    close_signals.append(f"MACD crossed above signal line: {last['macd']:.4f} > {last['macd_signal']:.4f}")
-                    close_condition = True
-                elif last['close'] > last['bb_middle']:
-                    close_signals.append(f"Price rose above BB middle band: {last['close']:.2f} > {last['bb_middle']:.2f}")
-                    close_condition = True
-                # Add exit on bullish divergence
-                elif bullish_divergence:
-                    close_signals.append(f"Bullish RSI divergence detected while in short position")
-                    close_condition = True
+                elif position.side == 'short':
+                    take_profit = position.entry * (1 - take_profit_pct)
+                    
+                    # Exit short if we hit stops or targets
+                    if position.trailing_stop and last['close'] >= position.trailing_stop:
+                        close_signals.append(f"Stop loss hit at {position.trailing_stop:.2f}")
+                        close_condition = True
+                    # Take profit for scalping
+                    elif last['close'] <= take_profit:
+                        close_signals.append(f"Take profit hit: {last['close']:.2f} <= {take_profit:.2f}")
+                        close_condition = True
+                    # Exit if we get MACD cross or close above middle band
+                    elif macd_cross_up:
+                        close_signals.append(f"MACD crossed above signal line: {last['macd']:.4f} > {last['macd_signal']:.4f}")
+                        close_condition = True
+                    elif last['close'] > last['bb_middle']:
+                        close_signals.append(f"Price rose above BB middle band: {last['close']:.2f} > {last['bb_middle']:.2f}")
+                        close_condition = True
+                    # Add exit on bullish divergence
+                    elif bullish_divergence:
+                        close_signals.append(f"Bullish RSI divergence detected while in short position")
+                        close_condition = True
+            
+            # When using trailing profit manager, let trailing profit logic handle exits
+            # Traditional exit criteria are not used, replaced by trend-based trailing
         
         long_signal = long_condition and not position
         short_signal = short_condition and not position
@@ -287,7 +298,19 @@ class BollingerSqueezeStrategy(BaseStrategy):
         close_signals = []
         close_condition = False
         
-        # Initialize if first check of this position
+        # When using trailing profit, delegate to trailing profit manager first
+        if self.use_trailing_profit:
+            position, trail_close, trail_signals = self.trailing_profit_manager.manage_trailing_profit(df, position)
+            
+            # If trailing profit manager says to close, respect that
+            if trail_close:
+                return position, trail_close, trail_signals
+                
+            # Otherwise, add any signals to our list
+            close_signals.extend(trail_signals)
+        
+        # Otherwise, use standard ATR-based stop management
+        # Initialize if first check of this position and trailing_stop not already set
         if not position.trailing_stop:
             # Calculate initial stop-loss based on ATR
             atr_value = last['atr']
@@ -301,49 +324,62 @@ class BollingerSqueezeStrategy(BaseStrategy):
             close_signals.append(f"Initial stop set at {position.trailing_stop:.2f} ({self.atr_multiple}x ATR)")
         else:
             # Increment candle counter
+            if not hasattr(position, 'open_candles'):
+                position.open_candles = 0
             position.open_candles += 1
         
-        # For scalping, move to breakeven very quickly (after just 1-2 candles)
-        if position.open_candles >= 2:
-            if position.side == 'long' and last['close'] > position.entry and position.trailing_stop < position.entry:
-                position.trailing_stop = position.entry
-                close_signals.append("Moved stop-loss to breakeven after 2 candles")
-            elif position.side == 'short' and last['close'] < position.entry and position.trailing_stop > position.entry:
-                position.trailing_stop = position.entry
-                close_signals.append("Moved stop-loss to breakeven after 2 candles")
-        
-        # Very aggressive trailing for scalping - much tighter than usual
-        atr_value = last['atr']
-        trailing_atr = self.atr_multiple * 0.5  # Use half the initial ATR multiple for trailing
-        
-        if position.side == 'long':
-            # Calculate potential new stop level based on ATR
-            potential_stop = last['close'] - (atr_value * trailing_atr)
+        # Standard stop management logic only if not using trailing profit
+        # or if trailing profit not yet activated
+        if not self.use_trailing_profit or not getattr(position, 'trailing_profit_activated', False):
+            # For scalping, move to breakeven very quickly (after just 1-2 candles)
+            if position.open_candles >= 2:
+                if position.side == 'long' and last['close'] > position.entry and position.trailing_stop < position.entry:
+                    position.trailing_stop = position.entry
+                    close_signals.append("Moved stop-loss to breakeven after 2 candles")
+                elif position.side == 'short' and last['close'] < position.entry and position.trailing_stop > position.entry:
+                    position.trailing_stop = position.entry
+                    close_signals.append("Moved stop-loss to breakeven after 2 candles")
             
-            # Move stop up if price has moved favorably
-            if potential_stop > position.trailing_stop:
-                position.trailing_stop = potential_stop
-                close_signals.append(f"Raised stop to {potential_stop:.2f}")
-                
-            # For scalping, also consider closing when returning to the middle band
-            if last['close'] < last['bb_middle'] and last['close'] > position.entry:
-                close_signals.append(f"Price returning to middle band ({last['bb_middle']:.2f}), consider closing")
-        
-        elif position.side == 'short':
-            # Calculate potential new stop level based on ATR
-            potential_stop = last['close'] + (atr_value * trailing_atr)
+            # Very aggressive trailing for scalping - much tighter than usual
+            atr_value = last['atr']
+            trailing_atr = self.atr_multiple * 0.5  # Use half the initial ATR multiple for trailing
             
-            # Move stop down if price has moved favorably
-            if potential_stop < position.trailing_stop:
-                position.trailing_stop = potential_stop
-                close_signals.append(f"Lowered stop to {potential_stop:.2f}")
+            if position.side == 'long':
+                # Calculate potential new stop level based on ATR
+                potential_stop = last['close'] - (atr_value * trailing_atr)
                 
-            # For scalping, also consider closing when returning to the middle band  
-            if last['close'] > last['bb_middle'] and last['close'] < position.entry:
-                close_signals.append(f"Price returning to middle band ({last['bb_middle']:.2f}), consider closing")
+                # Move stop up if price has moved favorably
+                if potential_stop > position.trailing_stop:
+                    position.trailing_stop = potential_stop
+                    close_signals.append(f"Raised stop to {potential_stop:.2f}")
+                    
+                # For scalping, also consider closing when returning to the middle band
+                if last['close'] < last['bb_middle'] and last['close'] > position.entry:
+                    close_signals.append(f"Price returning to middle band ({last['bb_middle']:.2f}), consider closing")
+            
+            elif position.side == 'short':
+                # Calculate potential new stop level based on ATR
+                potential_stop = last['close'] + (atr_value * trailing_atr)
+                
+                # Move stop down if price has moved favorably
+                if potential_stop < position.trailing_stop:
+                    position.trailing_stop = potential_stop
+                    close_signals.append(f"Lowered stop to {potential_stop:.2f}")
+                    
+                # For scalping, also consider closing when returning to the middle band  
+                if last['close'] > last['bb_middle'] and last['close'] < position.entry:
+                    close_signals.append(f"Price returning to middle band ({last['bb_middle']:.2f}), consider closing")
         
-        # Quicker time-based exit for scalping
-        if position.open_candles > self.position_max_candles:
+        # Quicker time-based exit for scalping - still applicable for trailing profit
+        # to avoid holding positions too long
+        max_candles = self.position_max_candles
+        if self.use_trailing_profit:
+            # Extend time limit if we're in significant profit using trailing profit
+            if hasattr(position, 'highest_profit_pct') and position.highest_profit_pct > 2.0:
+                # Double the allowed time if we're over 2% profit
+                max_candles = self.position_max_candles * 2
+                
+        if position.open_candles > max_candles:
             close_signals.append(f"Position time limit reached ({position.open_candles} candles)")
             close_condition = True
         

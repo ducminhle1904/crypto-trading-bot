@@ -374,9 +374,25 @@ class TradingBot:
                 market_info += (
                     f"\nPosition: {position.side.upper()}, "
                     f"Entry: ${position.entry:.2f}, "
-                    f"P/L: {unrealized_profit:.2f}%, "
-                    f"Duration: {position_duration:.1f}m"
+                    f"P/L: {unrealized_profit:.2f}% "
                 )
+                
+                # Add highest profit seen if using trailing profit
+                if hasattr(position, 'trailing_profit_activated') and position.trailing_profit_activated:
+                    market_info += f"(Peak: {position.highest_profit_pct:.2f}%), "
+                    market_info += f"TP Mode: ACTIVE, "
+                else:
+                    market_info += f", "
+                
+                # Add trailing stop info
+                if position.trailing_stop:
+                    if position.side == 'long':
+                        stop_distance = (last_price - position.trailing_stop) / last_price * 100
+                    else:
+                        stop_distance = (position.trailing_stop - last_price) / last_price * 100
+                    market_info += f"Stop: ${position.trailing_stop:.2f} ({stop_distance:.2f}% away), "
+                
+                market_info += f"Duration: {position_duration:.1f}m"
         
         # Send market update occasionally (every hour)
         if int(time.time()) % (3600) < 60:

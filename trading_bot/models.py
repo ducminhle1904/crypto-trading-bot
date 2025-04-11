@@ -17,6 +17,9 @@ class Position:
     trailing_stop: Optional[float] = None
     open_candles: int = 0
     strategy_name: str = "default"
+    trailing_profit_activated: bool = False
+    highest_profit_pct: float = 0.0
+    profit_lockout_level: int = 0
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert position to dictionary."""
@@ -28,7 +31,10 @@ class Position:
             'trade_id': self.trade_id,
             'trailing_stop': self.trailing_stop,
             'open_candles': self.open_candles,
-            'strategy_name': self.strategy_name
+            'strategy_name': self.strategy_name,
+            'trailing_profit_activated': self.trailing_profit_activated,
+            'highest_profit_pct': self.highest_profit_pct,
+            'profit_lockout_level': self.profit_lockout_level
         }
     
     @classmethod
@@ -42,7 +48,10 @@ class Position:
             trade_id=data['trade_id'],
             trailing_stop=data.get('trailing_stop'),
             open_candles=data.get('open_candles', 0),
-            strategy_name=data.get('strategy_name', 'default')
+            strategy_name=data.get('strategy_name', 'default'),
+            trailing_profit_activated=data.get('trailing_profit_activated', False),
+            highest_profit_pct=data.get('highest_profit_pct', 0.0),
+            profit_lockout_level=data.get('profit_lockout_level', 0)
         )
 
 

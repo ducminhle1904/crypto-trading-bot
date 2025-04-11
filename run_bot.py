@@ -14,7 +14,7 @@ from trading_bot.strategies.vwap_stoch_strategy import VwapStochStrategy
 from trading_bot.config import DEFAULT_SYMBOL, DEFAULT_TIMEFRAME, DEFAULT_LIMIT
 
 
-async def run_bot(symbol, timeframe, limit, strategies):
+async def run_bot(symbol, timeframe, limit, strategies, trailing_profit=True):
     """Run the trading bot with specified strategies."""
     # Initialize bot with the specified timeframe
     bot = await TradingBot(timeframe=timeframe).initialize()
@@ -40,7 +40,7 @@ async def run_bot(symbol, timeframe, limit, strategies):
     
     # Add new scalping strategies
     if 'squeeze' in strategies or 'all' in strategies:
-        bot.add_strategy(BollingerSqueezeStrategy(timeframe=timeframe))
+        bot.add_strategy(BollingerSqueezeStrategy(timeframe=timeframe, use_trailing_profit=trailing_profit))
     
     if 'vwap' in strategies or 'all' in strategies:
         bot.add_strategy(VwapStochStrategy(timeframe=timeframe))
@@ -76,6 +76,10 @@ if __name__ == "__main__":
                         help=f'Number of candles to fetch (default: {DEFAULT_LIMIT})')
     parser.add_argument('--strategies', type=str, default='all',
                         help='Strategies to run (comma-separated): ema,rsi,squeeze,vwap,all (default: all)')
+    parser.add_argument('--trailing-profit', action='store_true', default=True,
+                        help='Enable trailing profit feature to let profitable trades run longer (default: enabled)')
+    parser.add_argument('--no-trailing-profit', action='store_false', dest='trailing_profit',
+                        help='Disable trailing profit feature and use fixed take profit targets')
     
     args = parser.parse_args()
     strategies = args.strategies.lower().split(',')
@@ -91,10 +95,11 @@ if __name__ == "__main__":
     print(f"Starting trading bot with {args.timeframe} timeframe")
     print(f"Symbol: {args.symbol}")
     print(f"Strategies: {', '.join(strategies)}")
+    print(f"Trailing Profit: {'Enabled' if args.trailing_profit else 'Disabled'}")
     print(f"Note: The bot will automatically restore previous trading data from CSV if available")
     
     try:
-        asyncio.run(run_bot(args.symbol, args.timeframe, args.limit, strategies))
+        asyncio.run(run_bot(args.symbol, args.timeframe, args.limit, strategies, args.trailing_profit))
     except KeyboardInterrupt:
         print("Bot stopped by user")
     except Exception as e:
