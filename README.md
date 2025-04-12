@@ -1,36 +1,27 @@
-# Multi-Strategy Crypto Trading Bot
+# Crypto Trading Bot
 
-A modular, extensible crypto trading bot that can run multiple strategies simultaneously.
+A modular, extensible crypto trading bot with strategy-specific logging and performance tracking.
 
 ## Features
 
-- Run multiple trading strategies at the same time
-- Independent position management for each strategy
+- Run trading strategies with optimal parameters for different timeframes
+- Strategy-specific logging and performance tracking
+- Position management with trailing stops and automatic take-profit
 - Backtesting capabilities
-- Telegram notifications
-- CSV-based trade logging
-- Automated deployment of various indicators
+- Telegram notifications for trade events and performance reports
+- Comprehensive CSV-based trade logging
+- Technical indicators with automatic parameter adjustment by timeframe
 - Support for OKX exchange (more exchanges can be added)
-- Dynamic parameter adjustment based on timeframe
 
 ## Included Strategies
 
-- **EMA Trend Strategy**: Uses EMA crossovers, trend slope, and RSI to generate signals
 - **RSI Strategy**: Uses RSI oversold/overbought conditions with EMA filter
-- **Bollinger Squeeze Strategy**: Identifies volatility contractions followed by breakouts (great for scalping)
-- **VWAP + Stochastic Strategy**: Uses VWAP as intraday value area and Stochastic for trade timing (excellent for day trading)
 
-## Day Trading Optimizations
+  - Dynamic parameter adjustment by timeframe
+  - ATR-based trailing stops
+  - Profit targets scaled by volatility
 
-All strategies include special optimizations for day trading and scalping:
-
-- Tighter stop-loss levels
-- Faster trailing stops
-- Quick breakeven movements
-- Smaller profit targets
-- Shorter trade durations
-- Faster-responding indicators
-- Auto-adjustment based on timeframe (1m-5m optimized for scalping)
+- **EMA Trend Strategy**: Uses EMA crossovers, trend slope, and RSI confirmations
 
 ## Installation
 
@@ -52,28 +43,22 @@ All strategies include special optimizations for day trading and scalping:
 
 ### Running the Bot
 
-Run the bot with default settings (all strategies):
+Run the bot with default strategy:
 
 ```
 python run_bot.py
 ```
 
-Run specific strategies:
+Run with a specific strategy:
 
 ```
-python run_bot.py --strategies ema,rsi,squeeze,vwap
-```
-
-Run just the day trading strategies on 1-minute chart:
-
-```
-python run_bot.py --strategies squeeze,vwap --timeframe 1m
+python run_bot.py --strategy rsi
 ```
 
 Customize the trading symbol and timeframe:
 
 ```
-python run_bot.py --symbol "ETH/USDT:USDT" --timeframe 5m
+python run_bot.py --symbol "ETH/USDT:USDT" --timeframe 5m --strategy rsi
 ```
 
 ### Command Line Arguments
@@ -81,21 +66,52 @@ python run_bot.py --symbol "ETH/USDT:USDT" --timeframe 5m
 - `--symbol`: Trading symbol (default: BTC/USDT:USDT)
 - `--timeframe`: Candle timeframe (default: 3m)
 - `--limit`: Number of candles to fetch (default: 300)
-- `--strategies`: Strategies to run (comma-separated): ema,rsi,squeeze,vwap,all (default: all)
+- `--strategy`: Strategy to run: ema, rsi (default: ema)
 
-## Strategy Recommendations
+## Strategy Details
 
-For day trading and scalping:
+### RSI Strategy
 
-- Use 1m-3m timeframes
-- Try the `squeeze` and `vwap` strategies
-- Focus on liquid pairs like BTC/USDT, ETH/USDT
+The RSI strategy uses these core components:
 
-For swing trading:
+- RSI indicator to identify oversold/overbought conditions
+- EMA filter to ensure we're trading with the trend
+- ATR for dynamic trailing stops
 
-- Use 1h-4h timeframes
-- Try the `ema` and `rsi` strategies
-- Parameter adjustments happen automatically based on timeframe
+Parameters are automatically adjusted based on timeframe:
+
+- 1m-5m: Short-term scalping with tighter parameters
+- 15m-1h: Medium-term with balanced parameters
+- 4h-1d: Longer-term with wider parameters
+
+### EMA Trend Strategy
+
+Uses moving average crossovers with RSI confirmation.
+
+## Performance Tracking
+
+The bot includes a comprehensive performance tracking system:
+
+- Strategy-specific log files
+- Performance metrics saved to JSON
+- Trade summaries in CSV format
+- Telegram performance reports
+
+Key metrics tracked per strategy:
+
+- Win rate
+- Average profit
+- Profit factor
+- Max drawdown
+- Direction bias (long vs short performance)
+
+## Logging System
+
+Trade data is logged to strategy-specific files:
+
+- `trading_bot_{strategy_name}.log` - General logging
+- `trade_summary_{strategy_name}.csv` - Trade records
+- `strategy_performance_{strategy_name}.json` - Performance metrics
 
 ## Creating Custom Strategies
 
@@ -103,36 +119,49 @@ To create a custom strategy:
 
 1. Create a new file in the `trading_bot/strategies` directory
 2. Extend the `BaseStrategy` class
-3. Implement the abstract methods:
+3. Implement the required methods:
    - `calculate_indicators()`
    - `check_signals()`
    - `manage_position()`
-4. Add your strategy to the bot:
 
-   ```python
-   from trading_bot.strategies.your_strategy import YourStrategy
+Example skeleton:
 
-   bot.add_strategy(YourStrategy())
-   ```
+```python
+from trading_bot.strategies.base_strategy import BaseStrategy
+
+class YourStrategy(BaseStrategy):
+    def __init__(self, timeframe=None):
+        super().__init__(name="your_strategy", timeframe=timeframe)
+        # Initialize your parameters
+
+    async def calculate_indicators(self, df):
+        # Calculate indicators and add to dataframe
+        return df
+
+    async def check_signals(self, df, position=None):
+        # Generate trading signals
+        return long_signal, short_signal, close_signal, long_signals, short_signals, close_signals, {}
+
+    async def manage_position(self, df, position, balance):
+        # Manage open positions (trailing stops, etc.)
+        return position, close_signal, close_signals
+```
 
 ## Project Structure
 
 - `trading_bot/`: Main package
-  - `config.py`: Configuration and environment variables
-  - `models.py`: Data models for positions and trades
-  - `exchange_client.py`: Exchange API client
-  - `backtester.py`: Backtesting functionality
-  - `main.py`: Main bot orchestrator
+  - `config.py`: Configuration settings and file naming utilities
+  - `main.py`: Main bot class
+  - `backtester.py`: Backtesting engine
+  - `exchange_client.py`: Exchange API wrapper
   - `strategies/`: Strategy implementations
-    - `base_strategy.py`: Abstract base class for strategies
-    - `ema_trend_strategy.py`: EMA trend strategy
-    - `rsi_strategy.py`: RSI strategy
-    - `bollinger_squeeze_strategy.py`: Bollinger Squeeze strategy for scalping
-    - `vwap_stoch_strategy.py`: VWAP + Stochastic strategy for day trading
+    - `base_strategy.py`: Abstract base class for all strategies
+    - `rsi_strategy.py`: RSI strategy implementation
+    - `ema_trend_strategy.py`: EMA trend strategy implementation
   - `utils/`: Utility functions
-    - `indicators.py`: Technical indicators
-    - `logger.py`: Logging and notifications
-- `run_bot.py`: Command-line interface to run the bot
+    - `logger.py`: Logging and performance tracking system
+- `run_bot.py`: Command-line interface
+- `.env`: Environment variables (API keys)
 
 ## License
 

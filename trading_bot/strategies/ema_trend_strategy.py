@@ -15,15 +15,18 @@ class EmaTrendStrategy(BaseStrategy):
     EMA Trend Strategy uses EMA crossovers, trend slope, and RSI to generate signals.
     """
     
-    def __init__(self, timeframe: str = "3m"):
+    def __init__(self, timeframe: str = "4h", use_trailing_profit: bool = True):
         """Initialize the strategy with parameters."""
         super().__init__(name="ema_trend_strategy", timeframe=timeframe)
+        
+        # Whether to use trailing profit or fixed take profit
+        self.use_trailing_profit = use_trailing_profit
         
         # Set parameters based on timeframe
         self._set_parameters_for_timeframe()
         
         logger.info(f"Initialized EMA Trend Strategy with parameters: EMA Short={self.ema_short}, EMA Long={self.ema_long}, "
-                   f"Trend Window={self.trend_window}, RSI Period={self.rsi_period}")
+                   f"Trend Window={self.trend_window}, RSI Period={self.rsi_period}, Trailing Profit: {'Enabled' if use_trailing_profit else 'Disabled'}")
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
@@ -245,60 +248,80 @@ class EmaTrendStrategy(BaseStrategy):
         
         # Initialize if first check of this position
         if not position.trailing_stop:
-            # Calculate initial stop-loss based on volatility - tighter for day trading
+            # Calculate initial stop-loss based on volatility
             volatility_pct = last['atr'] / last['close'] * 100 if 'atr' in last else 0.5
             stop_loss_pct = max(self.stop_loss_pct * 0.67, min(self.stop_loss_pct, volatility_pct * 0.5))
+            atr_multiple = stop_loss_pct * 100 / volatility_pct if volatility_pct > 0 else 1.0
             
-            if position.side == 'long':
-                position.trailing_stop = position.entry * (1 - stop_loss_pct)
-            else:
-                position.trailing_stop = position.entry * (1 + stop_loss_pct)
+            position = await self.initialize_stop_loss(position, last['close'], last['atr'], atr_multiple)
             
+            # Initialize trailing profit tracking
+            if self.use_trailing_profit:
+                position.highest_profit_pct = 0.0
+                position.trailing_profit_activated = False
+            
+        # Increment candle counter
+        if not hasattr(position, 'open_candles'):
             position.open_candles = 0
-        else:
-            # Increment candle counter
-            position.open_candles += 1
+        position.open_candles += 1
         
-        # Implement quick trailing stop activation - even more aggressive for day trading
+        # Implement quick trailing stop activation - based on timeframe
         breakeven_threshold = 0.002  # For day trading, move to breakeven at just 0.2%
         if self.timeframe_minutes > 60:
             breakeven_threshold = 0.004  # 0.4% for 4h+
         elif self.timeframe_minutes > 5:
             breakeven_threshold = 0.003  # 0.3% for 15m-1h
             
-        trailing_threshold = breakeven_threshold * 1.5  # 1.5x the breakeven for trailing (more aggressive)
-            
-        if position.side == 'long':
-            breakeven_level = position.entry * (1 + breakeven_threshold)
-            
-            # Move to breakeven after small profit
-            if last['close'] > breakeven_level and position.trailing_stop < position.entry:
-                position.trailing_stop = position.entry
-                close_signals.append("Moved stop-loss to breakeven")
-            # More aggressive trailing as profit increases
-            elif last['close'] > position.entry * (1 + trailing_threshold):
-                potential_stop = max(position.entry, last['close'] * (1 - breakeven_threshold * 0.75))  # Even tighter trailing
-                if potential_stop > position.trailing_stop:
-                    position.trailing_stop = potential_stop
-                    close_signals.append(f"Updated trailing stop to {potential_stop:.2f}")
+        # Use common method to move to breakeven
+        position, breakeven_signals = await self.move_to_breakeven(position, last['close'], breakeven_threshold)
+        close_signals.extend(breakeven_signals)
         
-        elif position.side == 'short':
-            breakeven_level = position.entry * (1 - breakeven_threshold)
-            
-            # Move to breakeven after small profit
-            if last['close'] < breakeven_level and position.trailing_stop > position.entry:
-                position.trailing_stop = position.entry
-                close_signals.append("Moved stop-loss to breakeven")
-            # More aggressive trailing as profit increases
-            elif last['close'] < position.entry * (1 - trailing_threshold):
-                potential_stop = min(position.entry, last['close'] * (1 + breakeven_threshold * 0.75))  # Even tighter trailing
-                if potential_stop < position.trailing_stop:
-                    position.trailing_stop = potential_stop
-                    close_signals.append(f"Updated trailing stop to {potential_stop:.2f}")
+        # Handle trailing profit if enabled
+        if self.use_trailing_profit:
+            # Calculate current profit percentage
+            if position.side == 'long':
+                current_profit_pct = (last['close'] - position.entry) / position.entry * 100
+            else:  # short
+                current_profit_pct = (position.entry - last['close']) / position.entry * 100
+                
+            # Update highest profit seen
+            if not hasattr(position, 'highest_profit_pct'):
+                position.highest_profit_pct = current_profit_pct
+            elif current_profit_pct > position.highest_profit_pct:
+                position.highest_profit_pct = current_profit_pct
+                
+            # Lock in profit with trailing take-profit once we reach 1.5x the target
+            trailing_profit_threshold = self.profit_target_pct * 100 * 1.5
+            if not hasattr(position, 'trailing_profit_activated'):
+                position.trailing_profit_activated = False
+                
+            if current_profit_pct > trailing_profit_threshold:
+                position.trailing_profit_activated = True
+                
+                # Allow only 30% pullback from highest profit
+                max_pullback = position.highest_profit_pct * 0.3
+                
+                # Close position if price pulls back too much from the peak
+                if position.trailing_profit_activated and current_profit_pct < (position.highest_profit_pct - max_pullback):
+                    close_signals.append(f"Trailing profit: Locked in {current_profit_pct:.2f}% (max: {position.highest_profit_pct:.2f}%)")
+                    close_condition = True
         
-        # Quicker time-based exit for scalping
-        if position.open_candles > self.position_max_candles:
-            close_signals.append(f"Position time limit reached ({position.open_candles} candles)")
+        # More aggressive trailing as profit increases
+        trailing_threshold = breakeven_threshold * 1.5  # 1.5x the breakeven for trailing
+        trailing_atr_mult = 0.5  # Tighter trailing factor
+        
+        if ((position.side == 'long' and last['close'] > position.entry * (1 + trailing_threshold)) or
+            (position.side == 'short' and last['close'] < position.entry * (1 - trailing_threshold))):
+            
+            position, trailing_signals = await self.update_trailing_stop(
+                position, last['close'], last['atr'], trailing_atr_mult
+            )
+            close_signals.extend(trailing_signals)
+        
+        # Check for time-based exit
+        time_exit, time_signals = await self.check_max_holding_time(position, self.position_max_candles)
+        close_signals.extend(time_signals)
+        if time_exit:
             close_condition = True
         
         return position, close_condition, close_signals 

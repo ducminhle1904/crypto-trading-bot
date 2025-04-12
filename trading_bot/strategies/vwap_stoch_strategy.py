@@ -16,15 +16,19 @@ class VwapStochStrategy(BaseStrategy):
     for overbought/oversold levels. Perfect for intraday scalping.
     """
     
-    def __init__(self, timeframe: str = "3m"):
+    def __init__(self, timeframe: str = "5m", use_trailing_profit: bool = True):
         """Initialize the strategy with parameters."""
         super().__init__(name="vwap_stoch_strategy", timeframe=timeframe)
+        
+        # Whether to use trailing profit or fixed take profit
+        self.use_trailing_profit = use_trailing_profit
         
         # Set parameters based on timeframe
         self._set_parameters_for_timeframe()
         
-        logger.info(f"Initialized VWAP + Stochastic Strategy with parameters: "
-                   f"Stoch K={self.stoch_k}, Stoch D={self.stoch_d}, EMA={self.ema_period}")
+        logger.info(f"Initialized VWAP+Stochastic Strategy for {timeframe}, "
+                   f"Stoch K={self.stoch_k}, Stoch D={self.stoch_d}, "
+                   f"Trailing Profit: {'Enabled' if use_trailing_profit else 'Disabled'}")
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
@@ -235,72 +239,92 @@ class VwapStochStrategy(BaseStrategy):
         
         # Initialize if first check of this position
         if not position.trailing_stop:
-            # Calculate initial stop-loss based on ATR with tight stops
-            atr_value = last['atr']
+            # Calculate initial stop-loss based on ATR
+            position = await self.initialize_stop_loss(position, last['close'], last['atr'], self.atr_multiple)
             
-            if position.side == 'long':
-                position.trailing_stop = position.entry - (atr_value * self.atr_multiple)
-            else:
-                position.trailing_stop = position.entry + (atr_value * self.atr_multiple)
+            # Initialize trailing profit tracking
+            if self.use_trailing_profit:
+                position.highest_profit_pct = 0.0
+                position.trailing_profit_activated = False
             
+        # Increment candle counter
+        if not hasattr(position, 'open_candles'):
             position.open_candles = 0
-            close_signals.append(f"Initial stop set at {position.trailing_stop:.2f} ({self.atr_multiple}x ATR)")
-        else:
-            # Increment candle counter
-            position.open_candles += 1
+        position.open_candles += 1
         
-        # For scalping - 1 quick take profit level and quick breakeven
+        # Quick breakeven for scalping - just 0.2% profit
+        min_profit_pct = 0.002
+        position, breakeven_signals = await self.move_to_breakeven(position, last['close'], min_profit_pct)
+        close_signals.extend(breakeven_signals)
+        
+        # Handle trailing profit if enabled
+        if self.use_trailing_profit:
+            # Calculate current profit percentage
+            if position.side == 'long':
+                current_profit_pct = (last['close'] - position.entry) / position.entry * 100
+            else:  # short
+                current_profit_pct = (position.entry - last['close']) / position.entry * 100
+                
+            # Update highest profit seen
+            if not hasattr(position, 'highest_profit_pct'):
+                position.highest_profit_pct = current_profit_pct
+            elif current_profit_pct > position.highest_profit_pct:
+                position.highest_profit_pct = current_profit_pct
+                
+            # Lock in profit with trailing take-profit once we reach 1.5x the target
+            trailing_profit_threshold = self.profit_target_pct * 100 * 1.5
+            if not hasattr(position, 'trailing_profit_activated'):
+                position.trailing_profit_activated = False
+                
+            # Consider stochastic signals for trailing profit activation
+            stoch_extreme = (position.side == 'long' and last['stoch_k'] > 80) or \
+                           (position.side == 'short' and last['stoch_k'] < 20)
+                
+            if current_profit_pct > trailing_profit_threshold:
+                position.trailing_profit_activated = True
+                
+                # Allow only 20% pullback from highest profit (tighter for intraday VWAP strategy)
+                max_pullback = position.highest_profit_pct * 0.2
+                
+                # Close position if price pulls back too much from the peak
+                # Also consider stochastic extremes for earlier exits
+                if position.trailing_profit_activated and (current_profit_pct < (position.highest_profit_pct - max_pullback) or stoch_extreme):
+                    close_signals.append(f"Trailing profit: Locked in {current_profit_pct:.2f}% (max: {position.highest_profit_pct:.2f}%)")
+                    if stoch_extreme:
+                        close_signals.append(f"Stochastic extreme: K={last['stoch_k']:.2f}, D={last['stoch_d']:.2f}")
+                    close_condition = True
+        
+        # VWAP-based trailing logic
         if position.side == 'long':
-            # Move to breakeven after just 1-2 candles if profitable
-            if position.open_candles >= 1 and last['close'] > position.entry*1.002 and position.trailing_stop < position.entry:
-                position.trailing_stop = position.entry
-                close_signals.append("Moved stop-loss to breakeven quickly")
-            
-            # Very tight trailing stop for scalping based on VWAP
             # If we're above VWAP and making good profit, use VWAP as a stop
             if last['close'] > position.entry*1.003 and last['close'] > last['vwap'] and last['vwap'] > position.trailing_stop:
                 position.trailing_stop = last['vwap']
                 close_signals.append(f"Using VWAP as trailing stop: {last['vwap']:.2f}")
-            
-            # Also use ATR for trailing
-            atr_value = last['atr'] 
-            potential_stop = last['close'] - (atr_value * 0.5)  # Very tight trailing (0.5x ATR)
-            if potential_stop > position.trailing_stop:
-                position.trailing_stop = potential_stop
-                close_signals.append(f"Raised stop to {potential_stop:.2f}")
         
         elif position.side == 'short':
-            # Move to breakeven after just 1-2 candles if profitable
-            if position.open_candles >= 1 and last['close'] < position.entry*0.998 and position.trailing_stop > position.entry:
-                position.trailing_stop = position.entry
-                close_signals.append("Moved stop-loss to breakeven quickly")
-            
-            # Very tight trailing stop for scalping based on VWAP
             # If we're below VWAP and making good profit, use VWAP as a stop
             if last['close'] < position.entry*0.997 and last['close'] < last['vwap'] and last['vwap'] < position.trailing_stop:
                 position.trailing_stop = last['vwap']
                 close_signals.append(f"Using VWAP as trailing stop: {last['vwap']:.2f}")
-            
-            # Also use ATR for trailing
-            atr_value = last['atr']
-            potential_stop = last['close'] + (atr_value * 0.5)  # Very tight trailing (0.5x ATR)
-            if potential_stop < position.trailing_stop:
-                position.trailing_stop = potential_stop
-                close_signals.append(f"Lowered stop to {potential_stop:.2f}")
         
-        # Quick time-based exit for scalping - even faster than other strategies
-        if position.open_candles > self.position_max_candles:
-            close_signals.append(f"Position time limit reached ({position.open_candles} candles)")
+        # Also use ATR for tight trailing (0.5x ATR)
+        trailing_atr_mult = 0.5
+        position, trailing_signals = await self.update_trailing_stop(
+            position, last['close'], last['atr'], trailing_atr_mult
+        )
+        close_signals.extend(trailing_signals)
+        
+        # Check for time-based exit
+        time_exit, time_signals = await self.check_max_holding_time(position, self.position_max_candles)
+        close_signals.extend(time_signals)
+        if time_exit:
             close_condition = True
         
         # Consider stochastic signals for exit
-        if position.side == 'long' and last['stoch_k'] > 80 and last['stoch_d'] > 80:
-            close_signals.append(f"Stochastic overbought: K={last['stoch_k']:.2f}, D={last['stoch_d']:.2f}")
-            if position.open_candles > 3:  # Only force exit if we've been in position for 3+ candles
-                close_condition = True
-        
-        elif position.side == 'short' and last['stoch_k'] < 20 and last['stoch_d'] < 20:
-            close_signals.append(f"Stochastic oversold: K={last['stoch_k']:.2f}, D={last['stoch_d']:.2f}")
+        if ((position.side == 'long' and last['stoch_k'] > 80 and last['stoch_d'] > 80) or
+            (position.side == 'short' and last['stoch_k'] < 20 and last['stoch_d'] < 20)):
+            
+            close_signals.append(f"Stochastic extreme: K={last['stoch_k']:.2f}, D={last['stoch_d']:.2f}")
             if position.open_candles > 3:  # Only force exit if we've been in position for 3+ candles
                 close_condition = True
         

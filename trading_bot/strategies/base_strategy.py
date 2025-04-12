@@ -21,6 +21,10 @@ class BaseStrategy(ABC):
         
     def _parse_timeframe_minutes(self, timeframe: str) -> int:
         """Convert timeframe string to minutes."""
+        if not timeframe:
+            logger.warning(f"No timeframe provided to {self.name}, defaulting to 3m")
+            return 3
+            
         if timeframe.endswith('m'):
             return int(timeframe[:-1])
         elif timeframe.endswith('h'):
@@ -62,6 +66,72 @@ class BaseStrategy(ABC):
             - fail_reasons: List of reasons why signals failed
         """
         pass
+        
+    async def initialize_stop_loss(self, position: Position, last_price: float, 
+                                 atr_value: float, atr_multiple: float = 1.5) -> Position:
+        """Initialize stop loss for a position based on ATR."""
+        if not position.trailing_stop:
+            if position.side == 'long':
+                position.trailing_stop = position.entry - (atr_value * atr_multiple)
+            else:  # short
+                position.trailing_stop = position.entry + (atr_value * atr_multiple)
+                
+            position.open_candles = 0
+            logger.info(f"Initial stop set at {position.trailing_stop:.2f} ({atr_multiple}x ATR)")
+        
+        return position
+        
+    async def move_to_breakeven(self, position: Position, last_price: float, 
+                               min_profit_pct: float = 0.002) -> Tuple[Position, List[str]]:
+        """Move stop loss to breakeven if price has moved in favor by min_profit_pct."""
+        signals = []
+        
+        if position.side == 'long':
+            breakeven_price = position.entry * (1 + min_profit_pct)
+            if last_price > breakeven_price and position.trailing_stop < position.entry:
+                position.trailing_stop = position.entry
+                signals.append(f"Moved stop-loss to breakeven ({position.entry:.2f})")
+                
+        elif position.side == 'short':
+            breakeven_price = position.entry * (1 - min_profit_pct)
+            if last_price < breakeven_price and position.trailing_stop > position.entry:
+                position.trailing_stop = position.entry
+                signals.append(f"Moved stop-loss to breakeven ({position.entry:.2f})")
+                
+        return position, signals
+        
+    async def update_trailing_stop(self, position: Position, last_price: float, 
+                                 atr_value: float, trailing_atr_mult: float = 1.0) -> Tuple[Position, List[str]]:
+        """Update trailing stop based on ATR and current price."""
+        signals = []
+        
+        if position.side == 'long':
+            potential_stop = last_price - (atr_value * trailing_atr_mult)
+            if potential_stop > position.trailing_stop:
+                position.trailing_stop = potential_stop
+                signals.append(f"Raised stop to {potential_stop:.2f}")
+                
+        elif position.side == 'short':
+            potential_stop = last_price + (atr_value * trailing_atr_mult)
+            if potential_stop < position.trailing_stop:
+                position.trailing_stop = potential_stop
+                signals.append(f"Lowered stop to {potential_stop:.2f}")
+                
+        return position, signals
+    
+    async def check_max_holding_time(self, position: Position, max_candles: int) -> Tuple[bool, List[str]]:
+        """Check if position has reached maximum holding time."""
+        signals = []
+        close_condition = False
+        
+        if not hasattr(position, 'open_candles'):
+            position.open_candles = 0
+            
+        if position.open_candles >= max_candles:
+            signals.append(f"Position time limit reached ({position.open_candles} candles)")
+            close_condition = True
+            
+        return close_condition, signals
         
     @abstractmethod
     async def manage_position(self, df: pd.DataFrame, position: Position, balance: float) -> Tuple[

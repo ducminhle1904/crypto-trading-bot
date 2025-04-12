@@ -15,15 +15,19 @@ class RsiStrategy(BaseStrategy):
     RSI Strategy uses RSI oversold/overbought conditions and EMA filter.
     """
     
-    def __init__(self, timeframe: str = "3m"):
+    def __init__(self, timeframe: str = "1h", use_trailing_profit: bool = True):
         """Initialize the strategy with parameters."""
         super().__init__(name="rsi_strategy", timeframe=timeframe)
+        
+        # Whether to use trailing profit or fixed take profit
+        self.use_trailing_profit = use_trailing_profit
         
         # Set parameters based on timeframe
         self._set_parameters_for_timeframe()
         
         logger.info(f"Initialized RSI Strategy with parameters: RSI Period={self.rsi_period}, "
-                   f"Overbought={self.rsi_overbought}, Oversold={self.rsi_oversold}, EMA={self.ema_period}")
+                   f"RSI Levels: {self.rsi_oversold}/{self.rsi_overbought}, EMA={self.ema_period}, "
+                   f"Trailing Profit: {'Enabled' if use_trailing_profit else 'Disabled'}")
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
@@ -242,55 +246,72 @@ class RsiStrategy(BaseStrategy):
         
         # Initialize if first check of this position
         if not position.trailing_stop:
-            # Calculate initial stop-loss based on ATR - tighter for day trading
-            atr_value = last['atr']
+            # Initialize ATR-based stop loss
+            position = await self.initialize_stop_loss(position, last['close'], last['atr'], self.atr_multiple)
             
-            if position.side == 'long':
-                position.trailing_stop = position.entry - (atr_value * self.atr_multiple)
-            else:
-                position.trailing_stop = position.entry + (atr_value * self.atr_multiple)
+            # Initialize trailing profit tracking
+            if self.use_trailing_profit:
+                position.highest_profit_pct = 0.0
+                position.trailing_profit_activated = False
             
+        # Increment candle counter
+        if not hasattr(position, 'open_candles'):
             position.open_candles = 0
-            close_signals.append(f"Initial stop set at {position.trailing_stop:.2f} ({self.atr_multiple}x ATR)")
-        else:
-            # Increment candle counter
-            position.open_candles += 1
+        position.open_candles += 1
         
-        # Update trailing stop based on price movement - more aggressive for day trading
-        atr_value = last['atr']
-        trailing_atr = self.atr_multiple * 0.6  # Use an even tighter trailing factor for day trading
+        # Move to breakeven quickly for day trading
+        min_profit_pct = 0.003 if self.timeframe_minutes <= 60 else 0.005
+        position, breakeven_signals = await self.move_to_breakeven(position, last['close'], min_profit_pct)
+        close_signals.extend(breakeven_signals)
         
-        if position.side == 'long':
-            # For day trading, move to breakeven quickly
-            if position.open_candles >= 2 and last['close'] > position.entry and position.trailing_stop < position.entry:
-                position.trailing_stop = position.entry
-                close_signals.append("Moved stop-loss to breakeven after 2 candles")
+        # Handle trailing profit if enabled
+        if self.use_trailing_profit:
+            # Calculate current profit percentage
+            if position.side == 'long':
+                current_profit_pct = (last['close'] - position.entry) / position.entry * 100
+            else:  # short
+                current_profit_pct = (position.entry - last['close']) / position.entry * 100
                 
-            # Calculate potential new stop level based on ATR
-            potential_stop = last['close'] - (atr_value * trailing_atr)
-            
-            # Move stop up if price has moved favorably
-            if position.trailing_stop < potential_stop:
-                position.trailing_stop = potential_stop
-                close_signals.append(f"Raised stop to {potential_stop:.2f}")
-        
-        elif position.side == 'short':
-            # For day trading, move to breakeven quickly
-            if position.open_candles >= 2 and last['close'] < position.entry and position.trailing_stop > position.entry:
-                position.trailing_stop = position.entry
-                close_signals.append("Moved stop-loss to breakeven after 2 candles")
+            # Update highest profit seen
+            if not hasattr(position, 'highest_profit_pct'):
+                position.highest_profit_pct = current_profit_pct
+            elif current_profit_pct > position.highest_profit_pct:
+                position.highest_profit_pct = current_profit_pct
                 
-            # Calculate potential new stop level based on ATR
-            potential_stop = last['close'] + (atr_value * trailing_atr)
-            
-            # Move stop down if price has moved favorably
-            if position.trailing_stop > potential_stop:
-                position.trailing_stop = potential_stop
-                close_signals.append(f"Lowered stop to {potential_stop:.2f}")
+            # Lock in profit with trailing take-profit once we reach 1.5x the target
+            trailing_profit_threshold = self.profit_target_pct * 100 * 1.5
+            if not hasattr(position, 'trailing_profit_activated'):
+                position.trailing_profit_activated = False
+                
+            # RSI can help with exit timing for trailing profit
+            rsi_extreme = (position.side == 'long' and last['rsi'] > 70) or \
+                          (position.side == 'short' and last['rsi'] < 30)
+                
+            if current_profit_pct > trailing_profit_threshold:
+                position.trailing_profit_activated = True
+                
+                # Allow only 25% pullback from highest profit (tighter for RSI-based strategy)
+                max_pullback = position.highest_profit_pct * 0.25
+                
+                # Close position if price pulls back too much from the peak
+                # Also consider RSI extremes for exits
+                if position.trailing_profit_activated and (current_profit_pct < (position.highest_profit_pct - max_pullback) or rsi_extreme):
+                    close_signals.append(f"Trailing profit: Locked in {current_profit_pct:.2f}% (max: {position.highest_profit_pct:.2f}%)")
+                    if rsi_extreme:
+                        close_signals.append(f"RSI extreme value: {last['rsi']:.2f}")
+                    close_condition = True
         
-        # Quicker time-based exit for day trading
-        if position.open_candles > self.position_max_candles:
-            close_signals.append(f"Position time limit reached ({position.open_candles} candles)")
+        # Update trailing stop - tighter for day trading
+        trailing_atr_mult = self.atr_multiple * 0.6  # Use 60% of the initial ATR multiple for tighter trailing
+        position, trailing_signals = await self.update_trailing_stop(
+            position, last['close'], last['atr'], trailing_atr_mult
+        )
+        close_signals.extend(trailing_signals)
+        
+        # Check for time-based exit
+        time_exit, time_signals = await self.check_max_holding_time(position, self.position_max_candles)
+        close_signals.extend(time_signals)
+        if time_exit:
             close_condition = True
         
         return position, close_condition, close_signals 

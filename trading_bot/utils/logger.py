@@ -12,7 +12,8 @@ from collections import defaultdict
 from telegram import Bot
 from trading_bot.config import (
     logger, MAX_RETRIES, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-    SUMMARY_LOG_FILE, SUMMARY_HEADERS
+    SUMMARY_HEADERS, ACTIVE_STRATEGY, BASE_SUMMARY_FILE,
+    get_strategy_summary_file, get_strategy_performance_file
 )
 
 # Initialize telegram bot
@@ -42,15 +43,18 @@ strategy_metrics = defaultdict(lambda: {
 
 def setup_summary_logger():
     """Initialize the CSV summary log file with headers"""
-    file_exists = os.path.isfile(SUMMARY_LOG_FILE)
-    with open(SUMMARY_LOG_FILE, mode='a', newline='') as f:
+    # Get the correct summary file based on active strategy
+    summary_file = get_strategy_summary_file(ACTIVE_STRATEGY)
+    
+    file_exists = os.path.isfile(summary_file)
+    with open(summary_file, mode='a', newline='') as f:
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(SUMMARY_HEADERS)
-            logger.info(f"Created trade summary log file: {SUMMARY_LOG_FILE}")
+            logger.info(f"Created trade summary log file: {summary_file}")
     
     # Create a performance log file if it doesn't exist
-    performance_file = "strategy_performance.json"
+    performance_file = get_strategy_performance_file(ACTIVE_STRATEGY)
     if not os.path.isfile(performance_file):
         save_performance_metrics()
         logger.info(f"Created strategy performance file: {performance_file}")
@@ -58,15 +62,17 @@ def setup_summary_logger():
 def log_trade_summary(data: Dict[str, Any]):
     """Log a trade event to the summary CSV file and update strategy metrics"""
     try:
+        # Get the strategy name for file naming
+        strategy_name = data.get('strategy', ACTIVE_STRATEGY or 'unknown')
+        summary_file = get_strategy_summary_file(strategy_name)
+        
         # Write to CSV
-        with open(SUMMARY_LOG_FILE, mode='a', newline='') as f:
+        with open(summary_file, mode='a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([data.get(header, "") for header in SUMMARY_HEADERS])
         logger.debug(f"Logged trade summary: {data['action']} {data.get('side', '')}")
         
         # Update strategy performance metrics
-        strategy_name = data.get('strategy', 'unknown')
-        
         # Only process EXIT actions (completed trades)
         if data.get('action') == 'EXIT':
             profit_pct = data.get('profit_percent', 0.0)
@@ -120,36 +126,164 @@ def log_trade_summary(data: Dict[str, Any]):
             strategy_metrics[strategy_name]['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             # Save metrics after updates
-            save_performance_metrics()
+            save_performance_metrics(strategy_name)
             
     except Exception as e:
         logger.error(f"Error updating trade metrics: {e}")
 
-def save_performance_metrics():
+def save_performance_metrics(strategy_name=None):
     """Save strategy performance metrics to a JSON file"""
     try:
-        # Convert defaultdict to regular dict for JSON serialization
-        metrics_dict = {k: dict(v) for k, v in strategy_metrics.items()}
+        # Get appropriate file based on active strategy
+        performance_file = get_strategy_performance_file(strategy_name or ACTIVE_STRATEGY)
         
-        with open("strategy_performance.json", 'w') as f:
+        # If saving for a specific strategy, only include that strategy's data
+        if strategy_name:
+            metrics_dict = {strategy_name: dict(strategy_metrics[strategy_name])}
+        else:
+            # Convert defaultdict to regular dict for JSON serialization
+            metrics_dict = {k: dict(v) for k, v in strategy_metrics.items()}
+        
+        with open(performance_file, 'w') as f:
             json.dump(metrics_dict, f, indent=4)
+            
+        logger.debug(f"Saved performance metrics to {performance_file}")
     except Exception as e:
         logger.error(f"Error saving performance metrics: {e}")
 
-def load_performance_metrics():
+def load_performance_metrics(strategy_name=None):
     """Load strategy performance metrics from JSON file"""
     try:
-        if os.path.exists("strategy_performance.json"):
-            with open("strategy_performance.json", 'r') as f:
+        # Get appropriate file based on active strategy
+        performance_file = get_strategy_performance_file(strategy_name or ACTIVE_STRATEGY)
+        
+        if os.path.exists(performance_file):
+            with open(performance_file, 'r') as f:
                 loaded_metrics = json.load(f)
                 
             # Update the defaultdict with loaded values
             for strategy, metrics in loaded_metrics.items():
                 strategy_metrics[strategy].update(metrics)
                 
-            logger.info(f"Loaded performance metrics for {len(loaded_metrics)} strategies")
+            logger.info(f"Loaded performance metrics from {performance_file}")
     except Exception as e:
         logger.error(f"Error loading performance metrics: {e}")
+
+def load_previous_trades():
+    """
+    Load previous trades from the CSV file when restarting the bot.
+    Returns a dictionary with the following information:
+    - trades: Dictionary mapping strategy names to lists of trade results (profit percentages)
+    - positions: Dictionary mapping strategy names to the last open position (if any)
+    - balances: Dictionary mapping strategy names to the current balance
+    - trade_id: The next trade ID to use
+    """
+    trades = defaultdict(list)
+    positions = {}
+    balances = defaultdict(lambda: 1000.0)  # Default starting balance
+    trade_id = 1
+    
+    try:
+        # Get appropriate file based on active strategy
+        summary_file = get_strategy_summary_file(ACTIVE_STRATEGY)
+        
+        if not os.path.exists(summary_file):
+            # If strategy-specific file doesn't exist, also check the default file
+            if ACTIVE_STRATEGY and os.path.exists(BASE_SUMMARY_FILE):
+                summary_file = BASE_SUMMARY_FILE
+                logger.info(f"No strategy-specific trade file found, using default: {summary_file}")
+            else:
+                logger.info(f"No previous trade summary file found at {summary_file}")
+                return {
+                    'trades': dict(trades),
+                    'positions': positions,
+                    'balances': dict(balances),
+                    'trade_id': trade_id
+                }
+        
+        # Open positions tracking (to find the latest status of each open trade)
+        open_positions = {}
+        
+        with open(summary_file, mode='r', newline='') as f:
+            reader = csv.DictReader(f)
+            
+            # Add default header for strategy if not in the file headers
+            if 'strategy' not in reader.fieldnames and ACTIVE_STRATEGY:
+                logger.warning(f"No strategy column in {summary_file}, will use active strategy: {ACTIVE_STRATEGY}")
+                default_strategy = ACTIVE_STRATEGY
+            else:
+                default_strategy = 'unknown'
+            
+            for row in reader:
+                # Try to get trade ID, otherwise skip
+                try:
+                    tid = int(row.get('trade_id', 0))
+                    trade_id = max(trade_id, tid + 1)  # Next available trade ID
+                except (ValueError, TypeError):
+                    continue
+                
+                # Get strategy name, if not present, use active strategy
+                strategy = row.get('strategy', default_strategy)
+                
+                # Handle ENTRY - store position info
+                if row.get('action') == 'ENTRY':
+                    try:
+                        # Create position data
+                        open_positions[tid] = {
+                            'side': row.get('side', '').lower(),
+                            'entry': float(row.get('entry_price', row.get('price', 0))),
+                            'size': float(row.get('size', 0)),
+                            'open_time': datetime.fromisoformat(row.get('timestamp', datetime.now().isoformat())),
+                            'trade_id': tid,
+                            'strategy_name': strategy
+                        }
+                    except (ValueError, TypeError):
+                        logger.warning(f"Skipped malformed entry row for trade ID {tid}")
+                
+                # Handle EXIT - record completed trade
+                elif row.get('action') == 'EXIT':
+                    try:
+                        profit_pct = float(row.get('profit_percent', 0))
+                        trades[strategy].append(profit_pct)
+                        # If trade is closed, remove from open positions
+                        if tid in open_positions:
+                            del open_positions[tid]
+                        # Update strategy balance
+                        if row.get('balance'):
+                            balance = float(row.get('balance', 1000.0))
+                            balances[strategy] = balance
+                    except (ValueError, TypeError):
+                        logger.warning(f"Skipped malformed exit row for trade ID {tid}")
+        
+        # Convert open positions to the format needed by the bot
+        for trade_id, position_data in open_positions.items():
+            # Make sure the position contains the minimum required data
+            if all(k in position_data for k in ['side', 'entry', 'size', 'open_time', 'trade_id', 'strategy_name']):
+                positions[position_data['strategy_name']] = position_data
+            else:
+                logger.warning(f"Skipped incomplete position data for trade ID {trade_id}")
+        
+        # Only log if there's actual data
+        if trades or positions:
+            logger.info(f"Loaded trading history from {summary_file}: {len(trades)} strategies, "
+                       f"{sum(len(t) for t in trades.values())} completed trades, "
+                       f"{len(positions)} open positions")
+        
+        return {
+            'trades': dict(trades),
+            'positions': positions,
+            'balances': dict(balances),
+            'trade_id': trade_id
+        }
+    
+    except Exception as e:
+        logger.error(f"Error loading previous trades: {e}")
+        return {
+            'trades': dict(trades),
+            'positions': positions,
+            'balances': dict(balances),
+            'trade_id': trade_id
+        }
 
 async def generate_performance_report(strategies: Optional[List[str]] = None) -> str:
     """Generate a formatted performance report for all or specific strategies"""
@@ -191,146 +325,32 @@ async def generate_performance_report(strategies: Optional[List[str]] = None) ->
             report += f"{i}. {strategy}: {pf:.2f}\n"
     
     return report
-
-async def send_telegram_message(message: str, retries: int = 0) -> bool:
-    """Send message to Telegram chat"""
-    try:
-        await telegram_bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode='HTML')
-        logger.info(f"Sent Telegram message: {message}")
-        return True
-    except Exception as e:
-        if retries < MAX_RETRIES:
-            logger.warning(f"Error sending Telegram message, retrying ({retries+1}/{MAX_RETRIES}): {e}")
-            await asyncio.sleep(2 ** retries)
-            return await send_telegram_message(message, retries + 1)
-        else:
-            logger.error(f"Failed to send Telegram message after {MAX_RETRIES} attempts: {e}")
-            return False
             
 async def send_performance_report(strategies: Optional[List[str]] = None):
     """Generate and send performance report via Telegram"""
     report = await generate_performance_report(strategies)
     return await send_telegram_message(report)
-
-def load_previous_trades():
-    """
-    Load previous trades from the CSV file when restarting the bot.
-    Returns a dictionary with the following information:
-    - trades: Dictionary mapping strategy names to lists of trade results (profit percentages)
-    - positions: Dictionary mapping strategy names to the last open position (if any)
-    - balances: Dictionary mapping strategy names to the current balance
-    - trade_id: The next trade ID to use
-    """
-    trades = defaultdict(list)
-    positions = {}
-    balances = defaultdict(lambda: 1000.0)  # Default starting balance
-    trade_id = 1
     
-    try:
-        if not os.path.exists(SUMMARY_LOG_FILE):
-            logger.info(f"No previous trade summary file found at {SUMMARY_LOG_FILE}")
-            return {
-                'trades': dict(trades),
-                'positions': positions,
-                'balances': dict(balances),
-                'trade_id': trade_id
-            }
+async def send_telegram_message(message: str) -> bool:
+    """Send a message to Telegram. Returns True if successful, False otherwise."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("Missing Telegram credentials. Message not sent.")
+        return False
         
-        # Open positions tracking (to find the latest status of each open trade)
-        open_positions = {}  # {trade_id: position_data}
-        
-        with open(SUMMARY_LOG_FILE, mode='r', newline='') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # Skip rows with missing critical data
-                if not row.get('timestamp') or not row.get('action'):
-                    continue
-                
-                # Get the strategy name, defaulting to 'unknown'
-                strategy = row.get('strategy', 'unknown')
-                
-                # Parse trade_id and update the next available ID
-                if row.get('trade_id') and row['trade_id'].isdigit():
-                    current_trade_id = int(row['trade_id'])
-                    trade_id = max(trade_id, current_trade_id + 1)
-                
-                # Track trades and balances
-                if row['action'] == 'EXIT':
-                    # Add the trade result to the strategy's trade history
-                    if row.get('profit_percent') and row['profit_percent']:
-                        try:
-                            profit_pct = float(row['profit_percent'])
-                            trades[strategy].append(profit_pct)
-                        except ValueError:
-                            pass
-                    
-                    # Update the balance
-                    if row.get('balance') and row['balance']:
-                        try:
-                            balances[strategy] = float(row['balance'])
-                        except ValueError:
-                            pass
-                    
-                    # Remove the closed position from open positions
-                    if row.get('trade_id') in open_positions:
-                        del open_positions[row['trade_id']]
-                
-                elif row['action'] == 'ENTRY':
-                    # Track the open position
-                    try:
-                        # Parse the entry price and timestamp
-                        entry_price = float(row['entry_price']) if row.get('entry_price') else float(row['price'])
-                        timestamp = datetime.strptime(row['timestamp'], "%Y-%m-%d %H:%M:%S")
-                        
-                        # Create a position object for tracking
-                        position_data = {
-                            'side': row['side'].lower(),
-                            'entry': entry_price,
-                            'size': float(row['size']) if row.get('size') else 0.0,
-                            'open_time': timestamp,
-                            'trade_id': int(row['trade_id']) if row['trade_id'].isdigit() else 1,
-                            'strategy_name': strategy,
-                            'signals': row.get('signals', '')
-                        }
-                        
-                        open_positions[row['trade_id']] = position_data
-                    except (ValueError, KeyError) as e:
-                        logger.warning(f"Error parsing position data: {e}")
-                
-                # For UPDATE actions, we just want to keep track of the latest balance
-                elif row['action'] == 'UPDATE':
-                    if row.get('balance') and row['balance']:
-                        try:
-                            balances[strategy] = float(row['balance'])
-                        except ValueError:
-                            pass
-        
-        # Convert open positions to the format needed by the bot
-        for trade_id, position_data in open_positions.items():
-            # Make sure the position contains the minimum required data
-            if all(k in position_data for k in ['side', 'entry', 'size', 'open_time', 'trade_id', 'strategy_name']):
-                positions[position_data['strategy_name']] = position_data
-            else:
-                logger.warning(f"Skipped incomplete position data for trade ID {trade_id}")
-        
-        # Only log if there's actual data
-        if trades or positions:
-            logger.info(f"Loaded trading history from {SUMMARY_LOG_FILE}: {len(trades)} strategies, "
-                       f"{sum(len(t) for t in trades.values())} completed trades, "
-                       f"{len(positions)} open positions")
-        
-        return {
-            'trades': dict(trades),
-            'positions': positions,
-            'balances': dict(balances),
-            'trade_id': trade_id
-        }
+    retries = 0
+    while retries < MAX_RETRIES:
+        try:
+            await telegram_bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=message,
+                parse_mode='HTML'
+            )
+            return True
+        except Exception as e:
+            retries += 1
+            if retries >= MAX_RETRIES:
+                logger.error(f"Failed to send Telegram message after {MAX_RETRIES} attempts: {e}")
+                return False
+            await asyncio.sleep(2 ** retries)  # Exponential backoff
     
-    except Exception as e:
-        logger.error(f"Error loading previous trades: {e}")
-        return {
-            'trades': dict(trades),
-            'positions': positions,
-            'balances': dict(balances),
-            'trade_id': trade_id
-        } 
+    return False 

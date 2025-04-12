@@ -19,7 +19,7 @@ class BollingerSqueezeStrategy(BaseStrategy):
     Now with trailing profit to let winning trades run longer.
     """
     
-    def __init__(self, timeframe: str = "3m", use_trailing_profit: bool = True):
+    def __init__(self, timeframe: str = "15m", use_trailing_profit: bool = True):
         """Initialize the strategy with parameters."""
         super().__init__(name="bollinger_squeeze_strategy", timeframe=timeframe)
         
