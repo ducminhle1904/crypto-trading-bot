@@ -47,43 +47,16 @@ class DowEmaStrategy(BaseStrategy):
         # Fixed EMA periods according to request
         self.ema1 = 34  # First EMA (faster)
         self.ema2 = 89  # Second EMA (slower)
-        
-        # Scale other parameters based on timeframe
-        if minutes <= 15:  # 1m to 15m - short-term trading
-            self.trend_window = 14
-            self.rsi_period = 7
-            self.atr_period = 10
-            self.momentum_period = 3
-            self.volume_ma_period = 20
-            self.position_max_candles = 10
-            self.profit_target_pct = 0.01  # 1% target for shorter timeframes
-            self.stop_loss_pct = 0.005     # 0.5% stop loss
-            self.rsi_overbought = 75
-            self.rsi_oversold = 25
-            
-        elif minutes <= 60:  # 15m to 1h - medium settings (swing trading)
-            self.trend_window = 20
-            self.rsi_period = 10
-            self.atr_period = 14
-            self.momentum_period = 5
-            self.volume_ma_period = 30
-            self.position_max_candles = 12
-            self.profit_target_pct = 0.02  # 2% profit target
-            self.stop_loss_pct = 0.01      # 1% stop loss
-            self.rsi_overbought = 70
-            self.rsi_oversold = 30
-            
-        else:  # 4h, daily - longer-term settings
-            self.trend_window = 30
-            self.rsi_period = 14
-            self.atr_period = 14
-            self.momentum_period = 8
-            self.volume_ma_period = 50
-            self.position_max_candles = 15
-            self.profit_target_pct = 0.03  # 3% target
-            self.stop_loss_pct = 0.02      # 2% stop loss
-            self.rsi_overbought = 70
-            self.rsi_oversold = 30
+        self.trend_window = 30
+        self.rsi_period = 14
+        self.atr_period = 14
+        self.momentum_period = 8
+        self.volume_ma_period = 50
+        self.position_max_candles = 15
+        self.profit_target_pct = 0.03  # 3% target
+        self.stop_loss_pct = 0.02      # 2% stop loss
+        self.rsi_overbought = 70
+        self.rsi_oversold = 30
     
     def update_timeframe(self, timeframe: str):
         """Update the strategy timeframe and adjust parameters."""

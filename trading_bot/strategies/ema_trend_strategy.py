@@ -30,47 +30,17 @@ class EmaTrendStrategy(BaseStrategy):
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
-        minutes = self.timeframe_minutes
-        
-        # Scale parameters based on timeframe
-        if minutes <= 5:  # 1m to 5m - faster settings for scalping/day trading
-            self.ema_short = 9  # Faster EMA for short-term moves
-            self.ema_long = 21  # Shorter long EMA for day trading
-            self.trend_window = 20  # Shorter trend window for faster signals
-            self.rsi_period = 7   # More responsive RSI
-            self.atr_period = 10
-            self.momentum_period = 3
-            self.position_max_candles = 8  # Quicker exits for scalping
-            self.profit_target_pct = 0.005  # 0.5% target for scalping
-            self.stop_loss_pct = 0.004  # Tighter 0.4% stop loss
-            self.rsi_overbought = 75  # Tighter RSI bounds
-            self.rsi_oversold = 25
-            
-        elif minutes <= 60:  # 15m to 1h - medium settings
-            self.ema_short = 13
-            self.ema_long = 34
-            self.trend_window = 24
-            self.rsi_period = 10
-            self.atr_period = 14
-            self.momentum_period = 4
-            self.position_max_candles = 6  # Still fast exits for day trading
-            self.profit_target_pct = 0.008  # 0.8% - still quick profit target
-            self.stop_loss_pct = 0.006  # Tighter stop than original
-            self.rsi_overbought = 75
-            self.rsi_oversold = 25
-            
-        else:  # 4h, daily - slower settings
-            self.ema_short = 18
-            self.ema_long = 42
-            self.trend_window = 20
-            self.rsi_period = 14
-            self.atr_period = 14
-            self.momentum_period = 5
-            self.position_max_candles = 5
-            self.profit_target_pct = 0.025  # 2.5%
-            self.stop_loss_pct = 0.015  # 1.5%
-            self.rsi_overbought = 70
-            self.rsi_oversold = 30
+        self.ema_short = 18
+        self.ema_long = 42
+        self.trend_window = 20
+        self.rsi_period = 14
+        self.atr_period = 14
+        self.momentum_period = 5
+        self.position_max_candles = 5
+        self.profit_target_pct = 0.025  # 2.5%
+        self.stop_loss_pct = 0.015  # 1.5%
+        self.rsi_overbought = 70
+        self.rsi_oversold = 30
     
     def update_timeframe(self, timeframe: str):
         """Update the strategy timeframe and adjust parameters."""

@@ -4,9 +4,10 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
 
 ## Features
 
-- Run trading strategies with optimal parameters for different timeframes
+- Run trading strategies with their optimal timeframes by default
 - Strategy-specific logging and performance tracking
 - Position management with trailing stops and automatic take-profit
+- Frequent updates by default (5-minute checks with any timeframe strategy)
 - Backtesting capabilities
 - Telegram notifications for trade events and performance reports
 - Comprehensive CSV-based trade logging
@@ -15,13 +16,33 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
 
 ## Included Strategies
 
-- **RSI Strategy**: Uses RSI oversold/overbought conditions with EMA filter
+- **RSI Strategy (1h)**: Uses RSI oversold/overbought conditions with EMA filter
 
   - Dynamic parameter adjustment by timeframe
   - ATR-based trailing stops
   - Profit targets scaled by volatility
 
-- **EMA Trend Strategy**: Uses EMA crossovers, trend slope, and RSI confirmations
+- **EMA Trend Strategy (4h)**: Uses EMA crossovers, trend slope, and RSI confirmations
+
+  - Trailing profit management
+  - Dynamic stop-loss based on volatility
+
+- **Bollinger Squeeze Strategy (15m)**: Identifies consolidation patterns followed by volatility expansions
+
+  - Perfect for scalping explosive moves
+  - RSI divergence for confirmation
+  - ATR-based trailing stops
+
+- **VWAP Stochastic Strategy (5m)**: Uses VWAP for intraday value area and Stochastic for overbought/oversold levels
+
+  - Optimized for intraday scalping
+  - Fast profit-taking with small targets
+  - Dynamic stop management
+
+- **Dow Theory EMA Strategy (4h)**: Combines Dow Theory principles with EMA34 and EMA89 indicators
+  - Longer-term trend following
+  - Volume confirmation for trend strength
+  - Higher profit targets for trend trades
 
 ## Installation
 
@@ -43,34 +64,78 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
 
 ### Running the Bot
 
-Run the bot with default strategy:
+Run the bot with default strategy (EMA Trend):
 
 ```
 python run_bot.py
 ```
 
-Run with a specific strategy:
+Run with a specific strategy (using its optimal timeframe):
 
 ```
-python run_bot.py --strategy rsi
+python run_bot.py --strategy vwap
 ```
 
-Customize the trading symbol and timeframe:
+Override the strategy's optimal timeframe:
 
 ```
-python run_bot.py --symbol "ETH/USDT:USDT" --timeframe 5m --strategy rsi
+python run_bot.py --symbol "ETH/USDT:USDT" --strategy rsi --timeframe 15m
+```
+
+Disable frequent updates mode (only fetch data at strategy's timeframe):
+
+```
+python run_bot.py --strategy ema --no-frequent-updates
 ```
 
 ### Command Line Arguments
 
 - `--symbol`: Trading symbol (default: BTC/USDT:USDT)
-- `--timeframe`: Candle timeframe (default: 3m)
+- `--timeframe`: Override strategy's optimal timeframe (optional)
 - `--limit`: Number of candles to fetch (default: 300)
-- `--strategy`: Strategy to run: ema, rsi (default: ema)
+- `--strategy`: Strategy to run:
+  - `ema` (4h timeframe)
+  - `rsi` (1h timeframe)
+  - `squeeze` (15m timeframe)
+  - `vwap` (5m timeframe)
+  - `dow` (4h timeframe)
+- `--trailing-profit`: Enable trailing profit (default: enabled)
+- `--no-trailing-profit`: Disable trailing profit and use fixed take-profit targets
+- `--frequent-updates`: Enable frequent updates mode (default: enabled)
+- `--no-frequent-updates`: Disable frequent updates mode and only fetch data at strategy timeframe intervals
+
+## Strategy Optimal Timeframes
+
+Each strategy has been calibrated for an optimal timeframe:
+
+| Strategy          | Optimal Timeframe | Best For           |
+| ----------------- | ----------------- | ------------------ |
+| EMA Trend         | 4h                | Swing trading      |
+| RSI               | 1h                | Intraday reversals |
+| Bollinger Squeeze | 15m               | Breakout scalping  |
+| VWAP Stochastic   | 5m                | Intraday scalping  |
+| Dow EMA           | 4h                | Trend following    |
+
+## Frequent Updates Mode
+
+The bot now runs in a special frequent updates mode by default that:
+
+1. Fetches data every 5 minutes regardless of the strategy's timeframe
+2. Performs full analysis (signal generation) only when a complete candle of the strategy's timeframe closes
+3. Manages positions (trailing stops, breakeven adjustments) with the more frequent 5-minute data
+4. Provides more responsive risk management while preserving the strategy's optimal parameters
+
+This mode is especially useful for strategies with longer timeframes like EMA Trend (4h) or Dow EMA (4h), allowing them to manage risk more actively while still making trading decisions at their optimal timeframe.
+
+If you want to disable this feature and only fetch data at the strategy's timeframe intervals, use the `--no-frequent-updates` flag:
+
+```
+python run_bot.py --strategy ema --no-frequent-updates
+```
 
 ## Strategy Details
 
-### RSI Strategy
+### RSI Strategy (1h)
 
 The RSI strategy uses these core components:
 
@@ -84,9 +149,14 @@ Parameters are automatically adjusted based on timeframe:
 - 15m-1h: Medium-term with balanced parameters
 - 4h-1d: Longer-term with wider parameters
 
-### EMA Trend Strategy
+### EMA Trend Strategy (4h)
 
 Uses moving average crossovers with RSI confirmation.
+
+- Default EMAs: 18 and 42 periods
+- Trend slope calculation over 20 periods
+- RSI for momentum confirmation
+- 2.5% profit target and 1.5% stop loss by default
 
 ## Performance Tracking
 

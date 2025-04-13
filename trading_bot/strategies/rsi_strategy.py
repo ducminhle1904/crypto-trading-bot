@@ -31,41 +31,15 @@ class RsiStrategy(BaseStrategy):
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
-        minutes = self.timeframe_minutes
-        
-        # Scale parameters based on timeframe
-        if minutes <= 5:  # 1m to 5m - faster settings for day trading
-            self.rsi_period = 9  # Shorter RSI period for faster signals
-            self.rsi_overbought = 75  # Tighter RSI bounds for scalping
-            self.rsi_oversold = 25
-            self.ema_period = 20  # Shorter EMA for day trading
-            self.atr_period = 10  # Shorter ATR period for volatility assessment
-            self.atr_multiple = 1.0  # Tighter stops for day trading
-            self.position_max_candles = 10  # Quicker exits for day trading
-            self.use_close_price_filter = True  # Use more aggressive exit rules for scalping
-            self.profit_target_pct = 0.005  # 0.5% target for scalping
-            
-        elif minutes <= 60:  # 15m to 1h - medium settings
-            self.rsi_period = 12
-            self.rsi_overbought = 75
-            self.rsi_oversold = 25
-            self.ema_period = 50
-            self.atr_period = 14
-            self.atr_multiple = 1.5  # Still tighter stops for intraday
-            self.position_max_candles = 8
-            self.use_close_price_filter = True
-            self.profit_target_pct = 0.01  # 1% target
-            
-        else:  # 4h, daily - slower settings
-            self.rsi_period = 14
-            self.rsi_overbought = 80
-            self.rsi_oversold = 20
-            self.ema_period = 200
-            self.atr_period = 30
-            self.atr_multiple = 2.5
-            self.position_max_candles = 5
-            self.use_close_price_filter = False
-            self.profit_target_pct = 0.02  # 2% target
+        self.rsi_period = 12
+        self.rsi_overbought = 75
+        self.rsi_oversold = 25
+        self.ema_period = 50
+        self.atr_period = 14
+        self.atr_multiple = 1.5  # Still tighter stops for intraday
+        self.position_max_candles = 8
+        self.use_close_price_filter = True
+        self.profit_target_pct = 0.01  # 1% target
     
     def update_timeframe(self, timeframe: str):
         """Update the strategy timeframe and adjust parameters."""

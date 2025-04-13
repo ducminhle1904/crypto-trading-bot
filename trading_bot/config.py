@@ -34,11 +34,11 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # Default trading parameters
 DEFAULT_SYMBOL = "BTC/USDT:USDT"
 DEFAULT_TIMEFRAME = "3m"
-DEFAULT_LIMIT = 300
+DEFAULT_LIMIT = 150
 MAX_RETRIES = 3
 INITIAL_BALANCE = 1000
 RISK_PER_TRADE = 0.01
-TRADING_FEE = 0.001
+TRADING_FEE = 0.002
 
 # Base filenames (these will be modified based on strategy)
 BASE_LOG_FILE = "trading_bot.log"

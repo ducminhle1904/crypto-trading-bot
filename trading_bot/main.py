@@ -27,7 +27,7 @@ class TradingBot:
     Main trading bot class that handles a single strategy.
     """
     
-    def __init__(self, exchange_id: str = 'okx', timeframe: str = DEFAULT_TIMEFRAME):
+    def __init__(self, exchange_id: str = 'okx', timeframe: str = DEFAULT_TIMEFRAME, frequent_updates: bool = True):
         """Initialize the trading bot."""
         self.exchange_client = None
         self.exchange_id = exchange_id
@@ -37,19 +37,31 @@ class TradingBot:
         self.balance = INITIAL_BALANCE  # Single balance
         self.trades = []  # List of trades for the single strategy
         self.trade_id = 1
-        logger.info(f"Initialized trading bot for {timeframe} timeframe")
+        
+        # Frequent updates mode - fetches data every 5m but uses strategy's timeframe for analysis
+        self.frequent_updates = frequent_updates
+        self.fetch_timeframe = "5m" if frequent_updates else timeframe
+        self.analysis_timeframe = timeframe  # Original timeframe for analysis
+        
+        logger.info(f"Initialized trading bot for {timeframe} timeframe" + 
+                    (", with 5m frequent updates enabled" if frequent_updates else ""))
         
     def set_strategy(self, strategy: BaseStrategy):
         """Set the active strategy for the bot."""
         # Ensure strategy is using the same timeframe as the bot, or vice versa
         if hasattr(strategy, 'timeframe'):
-            if self.timeframe is None:
+            if self.analysis_timeframe is None:
                 # Bot doesn't have a timeframe, use the strategy's
+                self.analysis_timeframe = strategy.timeframe
                 self.timeframe = strategy.timeframe
+                if self.frequent_updates:
+                    self.fetch_timeframe = "5m"
+                else:
+                    self.fetch_timeframe = strategy.timeframe
                 logger.info(f"Set bot timeframe to strategy's optimal: {self.timeframe}")
-            elif self.timeframe != strategy.timeframe:
+            elif self.analysis_timeframe != strategy.timeframe:
                 # Strategy has a different timeframe than the bot, update strategy
-                strategy.update_timeframe(self.timeframe)
+                strategy.update_timeframe(self.analysis_timeframe)
         
         # Set the strategy
         self.strategy = strategy
@@ -62,7 +74,7 @@ class TradingBot:
         self.position = None
         self.balance = INITIAL_BALANCE
         self.trades = []
-        logger.info(f"Set active strategy: {strategy.name}, timeframe: {self.timeframe}")
+        logger.info(f"Set active strategy: {strategy.name}, analysis timeframe: {self.analysis_timeframe}, fetch timeframe: {self.fetch_timeframe}")
         
     async def initialize(self):
         """Initialize the bot and its components."""
@@ -80,6 +92,11 @@ class TradingBot:
                 # Use strategy's default timeframe
                 strategy = EmaTrendStrategy()  
                 self.timeframe = strategy.timeframe  # Get strategy's default timeframe
+                self.analysis_timeframe = strategy.timeframe
+                if self.frequent_updates:
+                    self.fetch_timeframe = "5m"
+                else:
+                    self.fetch_timeframe = strategy.timeframe
                 self.set_strategy(strategy)
                 logger.info(f"Using default strategy with its optimal timeframe: {self.timeframe}")
         
@@ -88,6 +105,11 @@ class TradingBot:
             logger.warning("No timeframe set during initialization, using default")
             from trading_bot.config import DEFAULT_TIMEFRAME
             self.timeframe = DEFAULT_TIMEFRAME
+            self.analysis_timeframe = DEFAULT_TIMEFRAME
+            if self.frequent_updates:
+                self.fetch_timeframe = "5m"
+            else:
+                self.fetch_timeframe = DEFAULT_TIMEFRAME
             if hasattr(self.strategy, 'update_timeframe'):
                 self.strategy.update_timeframe(self.timeframe)
         
@@ -150,9 +172,12 @@ class TradingBot:
     def update_timeframe(self, timeframe: str):
         """Update the timeframe for the bot and strategy."""
         self.timeframe = timeframe
+        self.analysis_timeframe = timeframe
+        if not self.frequent_updates:
+            self.fetch_timeframe = timeframe
         if self.strategy and hasattr(self.strategy, 'update_timeframe'):
             self.strategy.update_timeframe(timeframe)
-        logger.info(f"Updated bot timeframe to {timeframe}")
+        logger.info(f"Updated bot timeframe to {timeframe}, fetch timeframe: {self.fetch_timeframe}")
         
     async def backtest_strategy(self, symbol: str = DEFAULT_SYMBOL, timeframe: str = None, limit: int = DEFAULT_LIMIT):
         """Run backtest for the active strategy."""
@@ -162,7 +187,7 @@ class TradingBot:
                 timeframe = self.strategy.timeframe
                 logger.info(f"Using strategy's optimal timeframe for backtesting: {timeframe}")
             else:
-                timeframe = self.timeframe
+                timeframe = self.analysis_timeframe
                 
         df = await self.exchange_client.fetch_ohlcv(symbol, timeframe, limit)
         if df is None:
@@ -465,7 +490,7 @@ class TradingBot:
     async def run(self, symbol: str = DEFAULT_SYMBOL, timeframe: str = None, limit: int = DEFAULT_LIMIT):
         """Run the trading bot with a single strategy."""
         try:
-            # Use provided timeframe, bot's timeframe, or strategy's optimal timeframe
+            # Use provided timeframe or keep existing settings
             if timeframe:
                 if timeframe != self.timeframe:
                     self.update_timeframe(timeframe)
@@ -485,7 +510,8 @@ class TradingBot:
             
             startup_message = (
                 f"🤖 <b>Single Strategy Trading Bot Started</b>\n"
-                f"Monitoring {symbol} on {self.timeframe} timeframe\n"
+                f"Monitoring {symbol} on {self.fetch_timeframe} timeframe\n"
+                f"Analysis using {self.analysis_timeframe} timeframe\n"
                 f"Strategy: {self.strategy.name}"
             )
             
@@ -499,11 +525,15 @@ class TradingBot:
                 if has_open_position:
                     startup_message += f"\n🔄 Open position: {self.position.side.upper()}"
             
+            # Add information about frequent updates mode
+            if self.frequent_updates:
+                startup_message += f"\n\n⚡ <b>Frequent updates mode enabled</b>\nData fetched every 5m, analyzed using {self.analysis_timeframe} parameters"
+            
             # Send startup message
             await send_telegram_message(startup_message)
             
             # Run backtest to evaluate strategy
-            backtest_result = await self.backtest_strategy(symbol, self.timeframe, limit)
+            backtest_result = await self.backtest_strategy(symbol, self.analysis_timeframe, limit)
             if not backtest_result:
                 await send_telegram_message("⚠️ <b>Warning</b>: Backtest did not produce results. Check data quality.")
             
@@ -511,36 +541,74 @@ class TradingBot:
             retry_count = 0
             max_fetch_retries = 5  # Maximum number of consecutive fetch failures
             
+            # Track when we last processed a full timeframe candle
+            last_analysis_timestamp = None
+            
             while True:
                 try:
-                    # Wait for next candle
-                    wait_time = await self.exchange_client.get_next_candle_time(self.timeframe)
-                    logger.info(f"Waiting {wait_time:.2f} seconds for next candle...")
+                    # Wait for next candle based on fetch_timeframe
+                    wait_time = await self.exchange_client.get_next_candle_time(self.fetch_timeframe)
+                    logger.info(f"Waiting {wait_time:.2f} seconds for next {self.fetch_timeframe} candle...")
                     await asyncio.sleep(wait_time)
                     
-                    # Fetch latest data - ensure timeframe is never None
-                    latest_df = await self.exchange_client.fetch_ohlcv(symbol, self.timeframe, limit)
+                    # First fetch data in the fetch_timeframe (e.g., 5m)
+                    latest_df_fetch = await self.exchange_client.fetch_ohlcv(symbol, self.fetch_timeframe, limit)
                     
                     # Handle fetch failures with retry logic
-                    if latest_df is None:
+                    if latest_df_fetch is None:
                         retry_count += 1
                         if retry_count >= max_fetch_retries:
                             logger.critical(f"Failed to fetch data after {max_fetch_retries} consecutive attempts")
                             await send_telegram_message(f"🚨 <b>Critical Error</b>: Failed to fetch market data after {max_fetch_retries} consecutive attempts. Bot will restart.")
-                            # Wait longer before next attempt to avoid API rate limits
                             await asyncio.sleep(60)
                             retry_count = 0
                         else:
                             logger.warning(f"Failed to fetch data (attempt {retry_count}/{max_fetch_retries}), will retry")
-                            # Wait a short time before retry
                             await asyncio.sleep(5)
                         continue
                     
                     # Reset retry counter on successful fetch
                     retry_count = 0
                     
-                    # Process the candle
-                    await self.process_candle(latest_df, symbol)
+                    # When using frequent updates, we need additional processing
+                    if self.frequent_updates:
+                        # We still need to fetch analysis_timeframe data for actual signal analysis
+                        latest_df_analysis = await self.exchange_client.fetch_ohlcv(symbol, self.analysis_timeframe, limit)
+                        
+                        if latest_df_analysis is not None:
+                            # Check if we have a new analysis timeframe candle
+                            current_analysis_candle = latest_df_analysis.iloc[-1]['timestamp']
+                            new_analysis_candle = (last_analysis_timestamp is None or 
+                                                 current_analysis_candle != last_analysis_timestamp)
+                            
+                            if new_analysis_candle:
+                                # Process with the analysis timeframe data for full signals
+                                logger.info(f"Processing new {self.analysis_timeframe} candle for full analysis")
+                                await self.process_candle(latest_df_analysis, symbol)
+                                last_analysis_timestamp = current_analysis_candle
+                            else:
+                                # Just do position management with the more frequent data
+                                logger.info(f"Performing position management check with {self.fetch_timeframe} data")
+                                # If we have a position, manage it with the 5m data
+                                if self.position:
+                                    # Calculate indicators on 5m data
+                                    df_with_indicators = await self.strategy.calculate_indicators(latest_df_fetch.copy())
+                                    if df_with_indicators is not None:
+                                        # Just update the position (no new signals)
+                                        self.position, additional_close_signal, additional_signals = await self.strategy.manage_position(
+                                            df_with_indicators, self.position, self.balance
+                                        )
+                                        
+                                        # If we should close, do it
+                                        if additional_close_signal:
+                                            logger.info(f"Position management triggered a close signal")
+                                            # Similar position closing logic as in process_candle
+                                            # We'd need to extract that logic, or call process_candle with a flag
+                                            # For simplicity, let's process the whole candle
+                                            await self.process_candle(latest_df_fetch, symbol)
+                    else:
+                        # Standard mode - just process with the single timeframe
+                        await self.process_candle(latest_df_fetch, symbol)
                 
                 except asyncio.CancelledError:
                     logger.info("Bot execution cancelled")

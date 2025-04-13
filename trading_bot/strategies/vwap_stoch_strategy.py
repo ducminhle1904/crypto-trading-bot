@@ -32,42 +32,16 @@ class VwapStochStrategy(BaseStrategy):
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
-        minutes = self.timeframe_minutes
-        
-        # Scale parameters based on timeframe
-        if minutes <= 5:  # 1m to 5m - optimal for scalping
-            self.stoch_k = 14
-            self.stoch_d = 3
-            self.stoch_smooth = 3
-            self.ema_period = 8  # Very fast EMA
-            self.position_max_candles = 8  # Quick exits for scalping
-            self.atr_multiple = 1.0  # Tight stops for scalping
-            self.profit_target_pct = 0.005  # 0.5% target (small but frequent wins)
-            # Adjust overbought/oversold thresholds
-            self.oversold_threshold = 20
-            self.overbought_threshold = 80
-            
-        elif minutes <= 60:  # 15m to 1h - medium settings
-            self.stoch_k = 14
-            self.stoch_d = 3
-            self.stoch_smooth = 3
-            self.ema_period = 13
-            self.position_max_candles = 6
-            self.atr_multiple = 1.5
-            self.profit_target_pct = 0.01  # 1% target
-            self.oversold_threshold = 20
-            self.overbought_threshold = 80
-            
-        else:  # 4h, daily - slower settings
-            self.stoch_k = 14
-            self.stoch_d = 3
-            self.stoch_smooth = 3
-            self.ema_period = 21
-            self.position_max_candles = 5
-            self.atr_multiple = 2.0
-            self.profit_target_pct = 0.02  # 2% target
-            self.oversold_threshold = 20
-            self.overbought_threshold = 80
+        self.stoch_k = 14
+        self.stoch_d = 3
+        self.stoch_smooth = 3
+        self.ema_period = 8  # Very fast EMA
+        self.position_max_candles = 8  # Quick exits for scalping
+        self.atr_multiple = 1.0  # Tight stops for scalping
+        self.profit_target_pct = 0.005  # 0.5% target (small but frequent wins)
+        # Adjust overbought/oversold thresholds
+        self.oversold_threshold = 20
+        self.overbought_threshold = 80
     
     def update_timeframe(self, timeframe: str):
         """Update the strategy timeframe and adjust parameters."""

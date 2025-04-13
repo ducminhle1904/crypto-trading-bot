@@ -36,50 +36,18 @@ class BollingerSqueezeStrategy(BaseStrategy):
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
-        minutes = self.timeframe_minutes
-        
-        # Scale parameters based on timeframe
-        if minutes <= 5:  # 1m to 5m - optimal for scalping
-            self.bb_length = 20
-            self.bb_std = 2.0
-            self.keltner_length = 20
-            self.keltner_atr_mult = 1.5
-            self.macd_fast = 12
-            self.macd_slow = 26
-            self.macd_signal = 9
-            self.rsi_period = 14
-            self.rsi_divergence_lookback = 5
-            self.position_max_candles = 10  # Quick exits for scalping
-            self.atr_multiple = 1.0  # Tight stops for scalping
-            self.profit_target_pct = 0.005  # 0.5% target (small but frequent wins)
-            
-        elif minutes <= 60:  # 15m to 1h - medium settings
-            self.bb_length = 20
-            self.bb_std = 2.0
-            self.keltner_length = 20
-            self.keltner_atr_mult = 1.5
-            self.macd_fast = 12
-            self.macd_slow = 26
-            self.macd_signal = 9
-            self.rsi_period = 14
-            self.rsi_divergence_lookback = 8
-            self.position_max_candles = 8
-            self.atr_multiple = 1.5
-            self.profit_target_pct = 0.01  # 1% target
-            
-        else:  # 4h, daily - slower settings
-            self.bb_length = 20
-            self.bb_std = 2.0
-            self.keltner_length = 20
-            self.keltner_atr_mult = 1.5
-            self.macd_fast = 12
-            self.macd_slow = 26
-            self.macd_signal = 9
-            self.rsi_period = 14
-            self.rsi_divergence_lookback = 10
-            self.position_max_candles = 5
-            self.atr_multiple = 2.0
-            self.profit_target_pct = 0.02  # 2% target
+        self.bb_length = 20
+        self.bb_std = 2.0
+        self.keltner_length = 20
+        self.keltner_atr_mult = 1.5
+        self.macd_fast = 12
+        self.macd_slow = 26
+        self.macd_signal = 9
+        self.rsi_period = 14
+        self.rsi_divergence_lookback = 8
+        self.position_max_candles = 8
+        self.atr_multiple = 1.5
+        self.profit_target_pct = 0.01  # 1% target
     
     def update_timeframe(self, timeframe: str):
         """Update the strategy timeframe and adjust parameters."""
