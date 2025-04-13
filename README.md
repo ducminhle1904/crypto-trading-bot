@@ -40,9 +40,16 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
   - Dynamic stop management
 
 - **Dow Theory EMA Strategy (4h)**: Combines Dow Theory principles with EMA34 and EMA89 indicators
+
   - Longer-term trend following
   - Volume confirmation for trend strength
   - Higher profit targets for trend trades
+
+- **Volume Profile VWAP Strategy (5m)**: Combines VWAP with Volume Profile analysis
+  - Identifies high-probability entry/exit zones based on volume distribution
+  - Tighter stops near high-volume nodes
+  - Perfect for day trading with enhanced signal accuracy
+  - More aggressive profit locking with adaptive trailing stops
 
 ## Installation
 
@@ -76,6 +83,12 @@ Run with a specific strategy (using its optimal timeframe):
 python run_bot.py --strategy vwap
 ```
 
+Try the new Volume Profile VWAP strategy:
+
+```
+python run_bot.py --strategy vpvwap
+```
+
 Override the strategy's optimal timeframe:
 
 ```
@@ -99,6 +112,7 @@ python run_bot.py --strategy ema --no-frequent-updates
   - `squeeze` (15m timeframe)
   - `vwap` (5m timeframe)
   - `dow` (4h timeframe)
+  - `vpvwap` (5m timeframe)
 - `--trailing-profit`: Enable trailing profit (default: enabled)
 - `--no-trailing-profit`: Disable trailing profit and use fixed take-profit targets
 - `--frequent-updates`: Enable frequent updates mode (default: enabled)
@@ -108,13 +122,14 @@ python run_bot.py --strategy ema --no-frequent-updates
 
 Each strategy has been calibrated for an optimal timeframe:
 
-| Strategy          | Optimal Timeframe | Best For           |
-| ----------------- | ----------------- | ------------------ |
-| EMA Trend         | 4h                | Swing trading      |
-| RSI               | 1h                | Intraday reversals |
-| Bollinger Squeeze | 15m               | Breakout scalping  |
-| VWAP Stochastic   | 5m                | Intraday scalping  |
-| Dow EMA           | 4h                | Trend following    |
+| Strategy            | Optimal Timeframe | Best For                      |
+| ------------------- | ----------------- | ----------------------------- |
+| EMA Trend           | 4h                | Swing trading                 |
+| RSI                 | 1h                | Intraday reversals            |
+| Bollinger Squeeze   | 15m               | Breakout scalping             |
+| VWAP Stochastic     | 5m                | Intraday scalping             |
+| Dow EMA             | 4h                | Trend following               |
+| Volume Profile VWAP | 5m                | Day trading w/ better entries |
 
 ## Frequent Updates Mode
 
@@ -132,6 +147,29 @@ If you want to disable this feature and only fetch data at the strategy's timefr
 ```
 python run_bot.py --strategy ema --no-frequent-updates
 ```
+
+## Volume Profile VWAP Strategy
+
+The Volume Profile VWAP Strategy combines the power of:
+
+1. **VWAP (Volume Weighted Average Price)** - Dynamic intraday value level
+2. **Volume Profile** - Shows trading volume distribution at different price levels
+3. **Stochastic Oscillator** - Momentum indicator for overbought/oversold conditions
+
+Volume Profile provides significant enhancements by identifying:
+
+- **POC (Point of Control)** - The price level with the highest trading volume
+- **Value Area** - Price range containing 70% of total volume
+- **High Volume Nodes** - Areas of significant trading activity that often act as support/resistance
+
+This strategy specifically targets high-probability trades by combining:
+
+- Standard VWAP signals with Volume Profile confirmation
+- More reliable entries near high-volume levels
+- Tighter stops near Volume Profile POC (high-liquidity areas)
+- More aggressive trailing profit to lock in gains faster
+
+This strategy generates fewer but higher-quality signals, perfect for day trading.
 
 ## Strategy Details
 

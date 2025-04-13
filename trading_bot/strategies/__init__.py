@@ -1,4 +1,9 @@
 """
 Trading Strategies Package
 """
-from trading_bot.strategies.dow_ema_strategy import DowEmaStrategy 
+from trading_bot.strategies.dow_ema_strategy import DowEmaStrategy
+from trading_bot.strategies.ema_trend_strategy import EmaTrendStrategy
+from trading_bot.strategies.rsi_strategy import RsiStrategy
+from trading_bot.strategies.vwap_stoch_strategy import VwapStochStrategy
+from trading_bot.strategies.bollinger_squeeze_strategy import BollingerSqueezeStrategy
+from trading_bot.strategies.volume_profile_vwap_strategy import VolumeProfileVwapStrategy 

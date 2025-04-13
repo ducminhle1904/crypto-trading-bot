@@ -4,7 +4,7 @@ Technical indicators for trading strategies.
 import pandas as pd
 import numpy as np
 from scipy.stats import linregress
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, List
 
 
 def calculate_ema(series: pd.Series, period: int) -> pd.Series:
@@ -361,3 +361,223 @@ def apply_vwap_stoch_indicators(df: pd.DataFrame,
     except Exception as e:
         print(f"Error applying VWAP + Stochastic indicators: {e}")
         return None 
+
+
+def calculate_volume_profile(df: pd.DataFrame, num_bins: int = 20, lookback_periods: int = 100) -> Dict:
+    """
+    Calculate Volume Profile.
+    
+    Args:
+        df: DataFrame with OHLCV data
+        num_bins: Number of price levels to divide the range into
+        lookback_periods: Number of periods to look back for volume profile calculation
+        
+    Returns:
+        Dictionary containing volume profile data including POC, value area, and volume nodes
+    """
+    # Use only the lookback periods
+    data = df.iloc[-lookback_periods:].copy() if len(df) > lookback_periods else df.copy()
+    
+    if 'volume' not in data.columns or len(data) < 5:
+        # Return empty results if no volume data
+        return {
+            'poc_price': None,
+            'value_area_high': None,
+            'value_area_low': None,
+            'volume_nodes': [],
+            'high_volume_nodes': []
+        }
+    
+    # Get min and max prices in the range
+    price_min = data['low'].min()
+    price_max = data['high'].max()
+    price_range = price_max - price_min
+    
+    # Avoid division by zero for very tight ranges
+    if price_range <= 0:
+        price_range = data['close'].std() * 4
+        if price_range <= 0:
+            price_range = 1.0
+        price_min = data['close'].mean() - price_range/2
+        price_max = data['close'].mean() + price_range/2
+    
+    # Create price bins
+    bin_size = price_range / num_bins
+    price_bins = [price_min + i * bin_size for i in range(num_bins + 1)]
+    
+    # Initialize volume count for each bin
+    volume_profile = {i: 0 for i in range(num_bins)}
+    
+    # Calculate volume for each bin
+    for _, row in data.iterrows():
+        # Process each candle and distribute its volume
+        candle_min = min(row['open'], row['close'])
+        candle_max = max(row['open'], row['close'])
+        
+        # Find which bins this candle spans
+        min_bin = max(0, int((candle_min - price_min) / bin_size))
+        max_bin = min(num_bins - 1, int((candle_max - price_min) / bin_size))
+        
+        # Distribute volume proportionally across bins
+        bin_count = max(1, max_bin - min_bin + 1)  # Avoid division by zero
+        vol_per_bin = row['volume'] / bin_count
+        
+        for bin_idx in range(min_bin, max_bin + 1):
+            volume_profile[bin_idx] += vol_per_bin
+    
+    # Convert to list of (price, volume) tuples
+    volume_nodes = [(price_min + (i + 0.5) * bin_size, vol) for i, vol in volume_profile.items()]
+    
+    # Sort by volume to find point of control (POC)
+    sorted_nodes = sorted(volume_nodes, key=lambda x: x[1], reverse=True)
+    
+    # POC is the price level with highest volume
+    poc_price = sorted_nodes[0][0] if sorted_nodes else data['close'].iloc[-1]
+    
+    # Calculate value area (70% of volume)
+    total_volume = sum(vol for _, vol in volume_nodes)
+    value_area_target = total_volume * 0.7
+    
+    value_area_nodes = []
+    current_vol_sum = 0
+    
+    for price, vol in sorted_nodes:
+        value_area_nodes.append((price, vol))
+        current_vol_sum += vol
+        if current_vol_sum >= value_area_target:
+            break
+    
+    # Get high and low of value area
+    if value_area_nodes:
+        value_area_prices = [price for price, _ in value_area_nodes]
+        value_area_high = max(value_area_prices)
+        value_area_low = min(value_area_prices)
+    else:
+        value_area_high = data['high'].iloc[-1]
+        value_area_low = data['low'].iloc[-1]
+    
+    # Identify high volume nodes (nodes with significantly above average volume)
+    avg_volume = total_volume / num_bins
+    high_volume_nodes = [(price, vol) for price, vol in volume_nodes if vol > avg_volume * 1.5]
+    
+    return {
+        'poc_price': poc_price,
+        'value_area_high': value_area_high,
+        'value_area_low': value_area_low,
+        'volume_nodes': volume_nodes,
+        'high_volume_nodes': high_volume_nodes
+    }
+
+
+def volume_profile_signals(df: pd.DataFrame, vp_data: Dict) -> Tuple[bool, bool, List[str]]:
+    """
+    Generate signals based on Volume Profile analysis.
+    This function is designed to enhance existing signals, not replace them.
+    
+    Returns:
+        Tuple containing (potential_long, potential_short, reasons)
+    """
+    if vp_data['poc_price'] is None:
+        return False, False, ["No Volume Profile data available"]
+    
+    last_close = df['close'].iloc[-1]
+    last_high = df['high'].iloc[-1]
+    last_low = df['low'].iloc[-1]
+    
+    potential_long = False
+    potential_short = False
+    reasons = []
+    
+    # Check for price near POC
+    poc_price = vp_data['poc_price']
+    near_poc = abs(last_close - poc_price) / poc_price < 0.005  # Within 0.5% of POC
+    
+    # Check for price at value area boundaries
+    at_value_area_low = abs(last_low - vp_data['value_area_low']) / vp_data['value_area_low'] < 0.005
+    at_value_area_high = abs(last_high - vp_data['value_area_high']) / vp_data['value_area_high'] < 0.005
+    
+    # Price below value area (potential bounce or breakdown)
+    if last_close < vp_data['value_area_low']:
+        potential_long = True
+        reasons.append(f"Price below value area: potential bounce at {vp_data['value_area_low']:.2f}")
+    
+    # Price above value area (potential pullback or breakout)
+    if last_close > vp_data['value_area_high']:
+        potential_short = True
+        reasons.append(f"Price above value area: potential pullback from {vp_data['value_area_high']:.2f}")
+    
+    # Price near POC (potential reversal)
+    if near_poc:
+        reasons.append(f"Price near Point of Control: {poc_price:.2f} (high liquidity area)")
+        
+        # Check if we're near POC but just crossed it
+        prev_close = df['close'].iloc[-2] if len(df) > 1 else last_close
+        if prev_close < poc_price and last_close > poc_price:
+            potential_long = True
+            reasons.append("Crossed POC from below: bullish")
+        elif prev_close > poc_price and last_close < poc_price:
+            potential_short = True
+            reasons.append("Crossed POC from above: bearish")
+    
+    # Bouncing from value area edge
+    if at_value_area_low:
+        potential_long = True
+        reasons.append(f"Price at value area low: {vp_data['value_area_low']:.2f} (support)")
+    
+    if at_value_area_high:
+        potential_short = True
+        reasons.append(f"Price at value area high: {vp_data['value_area_high']:.2f} (resistance)")
+    
+    return potential_long, potential_short, reasons
+
+
+def apply_volume_profile_indicators(df: pd.DataFrame, 
+                                   num_bins: int = 20, 
+                                   lookback_periods: int = 100) -> Optional[pd.DataFrame]:
+    """
+    Apply Volume Profile analysis to a dataframe.
+    This adds volume profile features to enhance existing signals rather than creating new ones.
+    
+    Returns:
+        DataFrame with added volume profile indicators
+    """
+    try:
+        if df is None or len(df) < 10:
+            return None
+            
+        df = df.copy()
+        
+        # Calculate Volume Profile
+        vp_data = calculate_volume_profile(df, num_bins, lookback_periods)
+        
+        # Add Volume Profile data to dataframe
+        df['vp_poc'] = vp_data['poc_price']
+        df['vp_vah'] = vp_data['value_area_high']
+        df['vp_val'] = vp_data['value_area_low']
+        
+        # Calculate distance to POC as percentage
+        if vp_data['poc_price']:
+            df['vp_poc_dist'] = (df['close'] - vp_data['poc_price']) / vp_data['poc_price'] * 100
+        else:
+            df['vp_poc_dist'] = 0
+            
+        # Calculate if price is inside or outside value area
+        df['vp_in_value_area'] = (df['close'] >= vp_data['value_area_low']) & (df['close'] <= vp_data['value_area_high'])
+        
+        # Calculate distance to value area edges
+        if vp_data['value_area_high'] and vp_data['value_area_low']:
+            df['vp_vah_dist'] = (df['close'] - vp_data['value_area_high']) / vp_data['value_area_high'] * 100
+            df['vp_val_dist'] = (df['close'] - vp_data['value_area_low']) / vp_data['value_area_low'] * 100
+        else:
+            df['vp_vah_dist'] = 0
+            df['vp_val_dist'] = 0
+        
+        # Add additional volume profile signals
+        potential_long, potential_short, _ = volume_profile_signals(df, vp_data)
+        df['vp_potential_long'] = potential_long
+        df['vp_potential_short'] = potential_short
+        
+        return df
+    except Exception as e:
+        print(f"Error applying volume profile indicators: {e}")
+        return df  # Return original dataframe if error 

@@ -12,6 +12,7 @@ from trading_bot.strategies.rsi_strategy import RsiStrategy
 from trading_bot.strategies.bollinger_squeeze_strategy import BollingerSqueezeStrategy
 from trading_bot.strategies.vwap_stoch_strategy import VwapStochStrategy
 from trading_bot.strategies.dow_ema_strategy import DowEmaStrategy
+from trading_bot.strategies.volume_profile_vwap_strategy import VolumeProfileVwapStrategy
 from trading_bot.config import DEFAULT_SYMBOL, DEFAULT_TIMEFRAME, DEFAULT_LIMIT
 
 
@@ -31,6 +32,8 @@ async def run_bot(symbol, timeframe, limit, strategy_name, trailing_profit=True,
         strategy = VwapStochStrategy(use_trailing_profit=trailing_profit)  # Default 5m
     elif strategy_name == 'dow':
         strategy = DowEmaStrategy(use_trailing_profit=trailing_profit)  # Default 4h
+    elif strategy_name == 'vpvwap':
+        strategy = VolumeProfileVwapStrategy(use_trailing_profit=trailing_profit)  # Default 5m
     else:
         print(f"Strategy '{strategy_name}' not recognized, using default EMA strategy.")
         strategy = EmaTrendStrategy(use_trailing_profit=trailing_profit)
@@ -62,7 +65,7 @@ if __name__ == "__main__":
     parser.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
                         help=f'Number of candles to fetch (default: {DEFAULT_LIMIT})')
     parser.add_argument('--strategy', type=str, default='ema',
-                        help='Strategy to run: ema (4h), rsi (1h), squeeze (15m), vwap (5m), dow (4h)')
+                        help='Strategy to run: ema (4h), rsi (1h), squeeze (15m), vwap (5m), dow (4h), vpvwap (5m)')
     parser.add_argument('--trailing-profit', action='store_true', default=True,
                         help='Enable trailing profit feature to let profitable trades run longer (default: enabled)')
     parser.add_argument('--no-trailing-profit', action='store_false', dest='trailing_profit',
@@ -87,7 +90,8 @@ if __name__ == "__main__":
         'rsi': '1h',
         'squeeze': '15m',
         'vwap': '5m',
-        'dow': '4h'
+        'dow': '4h',
+        'vpvwap': '5m'
     }
     optimal_timeframe = timeframe_map.get(args.strategy, DEFAULT_TIMEFRAME)
     
