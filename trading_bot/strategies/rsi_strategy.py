@@ -15,7 +15,7 @@ class RsiStrategy(BaseStrategy):
     RSI Strategy uses RSI oversold/overbought conditions and EMA filter.
     """
     
-    def __init__(self, timeframe: str = "1h", use_trailing_profit: bool = True):
+    def __init__(self, timeframe: str = "15m", use_trailing_profit: bool = True):
         """Initialize the strategy with parameters."""
         super().__init__(name="rsi_strategy", timeframe=timeframe)
         
@@ -31,15 +31,17 @@ class RsiStrategy(BaseStrategy):
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
-        self.rsi_period = 12
-        self.rsi_overbought = 75
-        self.rsi_oversold = 25
-        self.ema_period = 50
-        self.atr_period = 14
-        self.atr_multiple = 1.5  # Still tighter stops for intraday
-        self.position_max_candles = 8
-        self.use_close_price_filter = True
-        self.profit_target_pct = 0.01  # 1% target
+        # For 15m timeframe, use more sensitive settings
+        if self.timeframe == "15m":
+            self.rsi_period = 10
+            self.rsi_overbought = 70
+            self.rsi_oversold = 30
+            self.ema_period = 34
+            self.atr_period = 14
+            self.atr_multiple = 1.2
+            self.position_max_candles = 12
+            self.use_close_price_filter = True
+            self.profit_target_pct = 0.01
     
     def update_timeframe(self, timeframe: str):
         """Update the strategy timeframe and adjust parameters."""

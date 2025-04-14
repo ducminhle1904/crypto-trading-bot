@@ -7,7 +7,6 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
 - Run trading strategies with their optimal timeframes by default
 - Strategy-specific logging and performance tracking
 - Position management with trailing stops and automatic take-profit
-- Frequent updates by default (5-minute checks with any timeframe strategy)
 - Backtesting capabilities
 - Telegram notifications for trade events and performance reports
 - Comprehensive CSV-based trade logging
@@ -16,7 +15,7 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
 
 ## Included Strategies
 
-- **RSI Strategy (1h)**: Uses RSI oversold/overbought conditions with EMA filter
+- **RSI Strategy (15m)**: Uses RSI oversold/overbought conditions with EMA filter
 
   - Dynamic parameter adjustment by timeframe
   - ATR-based trailing stops
@@ -46,10 +45,18 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
   - Higher profit targets for trend trades
 
 - **Volume Profile VWAP Strategy (5m)**: Combines VWAP with Volume Profile analysis
+
   - Identifies high-probability entry/exit zones based on volume distribution
   - Tighter stops near high-volume nodes
   - Perfect for day trading with enhanced signal accuracy
   - More aggressive profit locking with adaptive trailing stops
+
+- **Volume Profile Bollinger RSI Strategy (30m)**: Integrates Volume Profile with Bollinger Bands and RSI
+  - Identifies key volume levels for high-probability reversals
+  - Uses Bollinger Band compression/expansion for volatility timing
+  - RSI for momentum confirmation
+  - Multi-level trailing profit system with progressive lockout levels
+  - Adaptive stop-loss tightening near high-volume zones
 
 ## Installation
 
@@ -89,16 +96,16 @@ Try the new Volume Profile VWAP strategy:
 python run_bot.py --strategy vpvwap
 ```
 
+Try the Volume Profile Bollinger RSI strategy:
+
+```
+python run_bot.py --strategy vpbb
+```
+
 Override the strategy's optimal timeframe:
 
 ```
-python run_bot.py --symbol "ETH/USDT:USDT" --strategy rsi --timeframe 15m
-```
-
-Disable frequent updates mode (only fetch data at strategy's timeframe):
-
-```
-python run_bot.py --strategy ema --no-frequent-updates
+python run_bot.py --symbol "ETH/USDT:USDT" --strategy rsi --timeframe 1h
 ```
 
 ### Command Line Arguments
@@ -108,45 +115,51 @@ python run_bot.py --strategy ema --no-frequent-updates
 - `--limit`: Number of candles to fetch (default: 300)
 - `--strategy`: Strategy to run:
   - `ema` (4h timeframe)
-  - `rsi` (1h timeframe)
+  - `rsi` (15m timeframe)
   - `squeeze` (15m timeframe)
   - `vwap` (5m timeframe)
   - `dow` (4h timeframe)
   - `vpvwap` (5m timeframe)
+  - `vpbb` (30m timeframe)
 - `--trailing-profit`: Enable trailing profit (default: enabled)
 - `--no-trailing-profit`: Disable trailing profit and use fixed take-profit targets
-- `--frequent-updates`: Enable frequent updates mode (default: enabled)
-- `--no-frequent-updates`: Disable frequent updates mode and only fetch data at strategy timeframe intervals
 
 ## Strategy Optimal Timeframes
 
 Each strategy has been calibrated for an optimal timeframe:
 
-| Strategy            | Optimal Timeframe | Best For                      |
-| ------------------- | ----------------- | ----------------------------- |
-| EMA Trend           | 4h                | Swing trading                 |
-| RSI                 | 1h                | Intraday reversals            |
-| Bollinger Squeeze   | 15m               | Breakout scalping             |
-| VWAP Stochastic     | 5m                | Intraday scalping             |
-| Dow EMA             | 4h                | Trend following               |
-| Volume Profile VWAP | 5m                | Day trading w/ better entries |
+| Strategy                     | Optimal Timeframe | Best For                       |
+| ---------------------------- | ----------------- | ------------------------------ |
+| EMA Trend                    | 4h                | Swing trading                  |
+| RSI                          | 15m               | Intraday reversals             |
+| Bollinger Squeeze            | 15m               | Breakout scalping              |
+| VWAP Stochastic              | 5m                | Intraday scalping              |
+| Dow EMA                      | 4h                | Trend following                |
+| Volume Profile VWAP          | 5m                | Day trading w/ better entries  |
+| Volume Profile Bollinger RSI | 30m               | Reversals at key volume levels |
 
-## Frequent Updates Mode
+## Volume Profile Bollinger RSI Strategy
 
-The bot now runs in a special frequent updates mode by default that:
+The Volume Profile Bollinger RSI Strategy combines three powerful components:
 
-1. Fetches data every 5 minutes regardless of the strategy's timeframe
-2. Performs full analysis (signal generation) only when a complete candle of the strategy's timeframe closes
-3. Manages positions (trailing stops, breakeven adjustments) with the more frequent 5-minute data
-4. Provides more responsive risk management while preserving the strategy's optimal parameters
+1. **Volume Profile** - Identifies key price levels with significant historical volume
+2. **Bollinger Bands** - Measures volatility expansion/contraction cycles
+3. **RSI (Relative Strength Index)** - Provides momentum confirmation
 
-This mode is especially useful for strategies with longer timeframes like EMA Trend (4h) or Dow EMA (4h), allowing them to manage risk more actively while still making trading decisions at their optimal timeframe.
+This strategy specifically looks for high-probability reversal and continuation patterns where:
 
-If you want to disable this feature and only fetch data at the strategy's timeframe intervals, use the `--no-frequent-updates` flag:
+- Price interacts with significant volume nodes (POC or Value Area boundaries)
+- Bollinger Bands indicate either compression (ready to expand) or price reaching band extremes
+- RSI confirms momentum direction and potential overbought/oversold conditions
 
-```
-python run_bot.py --strategy ema --no-frequent-updates
-```
+Key features:
+
+- **Volume-aware stops** - Tightens stop losses when price is near high-volume zones
+- **Multi-level profit locking** - Progressive trailing profit system that locks in gains at 30%, 50%, 70%, and 90% of target
+- **Adaptive parameters** - Automatically adjusts RSI sensitivity, profit targets, and stop distance based on timeframe
+- **Timeframe flexibility** - Works well across 15m, 30m, and 1h timeframes
+
+The strategy generates balanced trade signals that respect volume distribution while capturing volatility expansion moves. Perfect for trading reversals at key institutional levels.
 
 ## Volume Profile VWAP Strategy
 
@@ -173,13 +186,15 @@ This strategy generates fewer but higher-quality signals, perfect for day tradin
 
 ## Strategy Details
 
-### RSI Strategy (1h)
+### RSI Strategy (15m)
 
 The RSI strategy uses these core components:
 
-- RSI indicator to identify oversold/overbought conditions
-- EMA filter to ensure we're trading with the trend
-- ATR for dynamic trailing stops
+- RSI indicator to identify oversold/overbought conditions (RSI period: 10)
+- EMA filter to ensure we're trading with the trend (EMA period: 34)
+- ATR for dynamic trailing stops with tighter settings for 15m timeframe
+- More sensitive RSI levels (30/70) for faster signal generation
+- 0.8% profit target for shorter-term trades
 
 Parameters are automatically adjusted based on timeframe:
 
