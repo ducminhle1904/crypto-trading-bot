@@ -15,7 +15,7 @@ class EmaTrendStrategy(BaseStrategy):
     EMA Trend Strategy uses EMA crossovers, trend slope, and RSI to generate signals.
     """
     
-    def __init__(self, timeframe: str = "4h", use_trailing_profit: bool = True):
+    def __init__(self, timeframe: str = "1h", use_trailing_profit: bool = True):
         """Initialize the strategy with parameters."""
         super().__init__(name="ema_trend_strategy", timeframe=timeframe)
         
@@ -30,17 +30,48 @@ class EmaTrendStrategy(BaseStrategy):
     
     def _set_parameters_for_timeframe(self):
         """Set strategy parameters based on the timeframe."""
-        self.ema_short = 18
-        self.ema_long = 42
-        self.trend_window = 20
-        self.rsi_period = 14
-        self.atr_period = 14
-        self.momentum_period = 5
-        self.position_max_candles = 5
-        self.profit_target_pct = 0.025  # 2.5%
-        self.stop_loss_pct = 0.015  # 1.5%
-        self.rsi_overbought = 70
-        self.rsi_oversold = 30
+        minutes = self.timeframe_minutes
+        
+        # Base parameters - these will be adjusted based on timeframe
+        if minutes <= 15:  # For short timeframes (1m-15m)
+            # Faster settings for scalping
+            self.ema_short = 9
+            self.ema_long = 21
+            self.trend_window = 10
+            self.rsi_period = 7
+            self.atr_period = 10
+            self.momentum_period = 3
+            self.position_max_candles = 8
+            self.profit_target_pct = 0.015  # 1.5%
+            self.stop_loss_pct = 0.01  # 1%
+            self.rsi_overbought = 75
+            self.rsi_oversold = 25
+        elif minutes <= 60:  # For medium timeframes (30m-1h)
+            # Optimized for 1h timeframe
+            self.ema_short = 13
+            self.ema_long = 34
+            self.trend_window = 15
+            self.rsi_period = 10
+            self.atr_period = 14
+            self.momentum_period = 4
+            self.position_max_candles = 6
+            self.profit_target_pct = 0.02  # 2%
+            self.stop_loss_pct = 0.012  # 1.2%
+            self.rsi_overbought = 70
+            self.rsi_oversold = 30
+        else:  # For higher timeframes (4h+)
+            # Default values (previously used for all timeframes)
+            self.ema_short = 18
+            self.ema_long = 42
+            self.trend_window = 20
+            self.rsi_period = 14
+            self.atr_period = 14
+            self.momentum_period = 5
+            self.position_max_candles = 5
+            self.profit_target_pct = 0.025  # 2.5%
+            self.stop_loss_pct = 0.015  # 1.5%
+            self.rsi_overbought = 70
+            self.rsi_oversold = 30
     
     def update_timeframe(self, timeframe: str):
         """Update the strategy timeframe and adjust parameters."""
@@ -235,18 +266,20 @@ class EmaTrendStrategy(BaseStrategy):
             position.open_candles = 0
         position.open_candles += 1
         
-        # Implement quick trailing stop activation - based on timeframe
-        breakeven_threshold = 0.002  # For day trading, move to breakeven at just 0.2%
-        if self.timeframe_minutes > 60:
-            breakeven_threshold = 0.004  # 0.4% for 4h+
-        elif self.timeframe_minutes > 5:
-            breakeven_threshold = 0.003  # 0.3% for 15m-1h
+        # Implement timeframe-specific breakeven thresholds
+        minutes = self.timeframe_minutes
+        if minutes <= 15:  # Short timeframes (1m-15m)
+            breakeven_threshold = 0.0015  # 0.15% for very short timeframes
+        elif minutes <= 60:  # Medium timeframes (30m-1h)
+            breakeven_threshold = 0.0025  # 0.25% for 1h timeframe - optimized for quicker breakeven
+        else:  # Higher timeframes (4h+)
+            breakeven_threshold = 0.004  # 0.4% for higher timeframes
             
         # Use common method to move to breakeven
         position, breakeven_signals = await self.move_to_breakeven(position, last['close'], breakeven_threshold)
         close_signals.extend(breakeven_signals)
         
-        # Handle trailing profit if enabled
+        # Handle trailing profit with timeframe-specific settings
         if self.use_trailing_profit:
             # Calculate current profit percentage
             if position.side == 'long':
@@ -260,25 +293,41 @@ class EmaTrendStrategy(BaseStrategy):
             elif current_profit_pct > position.highest_profit_pct:
                 position.highest_profit_pct = current_profit_pct
                 
-            # Lock in profit with trailing take-profit once we reach 1.5x the target
-            trailing_profit_threshold = self.profit_target_pct * 100 * 1.5
+            # Lock in profit with trailing take-profit with timeframe-specific thresholds
+            if minutes <= 15:  # Short timeframes
+                trailing_profit_threshold = self.profit_target_pct * 100 * 1.2  # 120% of target
+                max_pullback_pct = 0.4  # Allow 40% pullback for short timeframes (more noise)
+            elif minutes <= 60:  # Medium timeframes (optimized for 1h)
+                trailing_profit_threshold = self.profit_target_pct * 100 * 1.3  # 130% of target
+                max_pullback_pct = 0.35  # 35% pullback allowed for 1h timeframe - balanced
+            else:  # Higher timeframes
+                trailing_profit_threshold = self.profit_target_pct * 100 * 1.5  # 150% of target
+                max_pullback_pct = 0.3  # 30% pullback allowed for higher timeframes
+                
             if not hasattr(position, 'trailing_profit_activated'):
                 position.trailing_profit_activated = False
                 
             if current_profit_pct > trailing_profit_threshold:
                 position.trailing_profit_activated = True
                 
-                # Allow only 30% pullback from highest profit
-                max_pullback = position.highest_profit_pct * 0.3
+                # Apply timeframe-specific pullback management
+                max_pullback = position.highest_profit_pct * max_pullback_pct
                 
                 # Close position if price pulls back too much from the peak
                 if position.trailing_profit_activated and current_profit_pct < (position.highest_profit_pct - max_pullback):
                     close_signals.append(f"Trailing profit: Locked in {current_profit_pct:.2f}% (max: {position.highest_profit_pct:.2f}%)")
                     close_condition = True
         
-        # More aggressive trailing as profit increases
-        trailing_threshold = breakeven_threshold * 1.5  # 1.5x the breakeven for trailing
-        trailing_atr_mult = 0.5  # Tighter trailing factor
+        # More aggressive trailing stops with timeframe-specific settings
+        trailing_threshold = breakeven_threshold * 1.5  # 1.5x the breakeven for trailing activation
+        
+        # Adjust trailing ATR multiple based on timeframe
+        if minutes <= 15:
+            trailing_atr_mult = 0.4  # Tighter trailing for short timeframes
+        elif minutes <= 60:
+            trailing_atr_mult = 0.45  # Optimized for 1h - slightly tighter than before
+        else:
+            trailing_atr_mult = 0.5  # Standard trailing factor for higher timeframes
         
         if ((position.side == 'long' and last['close'] > position.entry * (1 + trailing_threshold)) or
             (position.side == 'short' and last['close'] < position.entry * (1 - trailing_threshold))):

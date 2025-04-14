@@ -21,7 +21,7 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
   - ATR-based trailing stops
   - Profit targets scaled by volatility
 
-- **EMA Trend Strategy (4h)**: Uses EMA crossovers, trend slope, and RSI confirmations
+- **EMA Trend Strategy (1h)**: Uses EMA crossovers, trend slope, and RSI confirmations
 
   - Trailing profit management
   - Dynamic stop-loss based on volatility
@@ -114,7 +114,7 @@ python run_bot.py --symbol "ETH/USDT:USDT" --strategy rsi --timeframe 1h
 - `--timeframe`: Override strategy's optimal timeframe (optional)
 - `--limit`: Number of candles to fetch (default: 300)
 - `--strategy`: Strategy to run:
-  - `ema` (4h timeframe)
+  - `ema` (1h timeframe)
   - `rsi` (15m timeframe)
   - `squeeze` (15m timeframe)
   - `vwap` (5m timeframe)
@@ -130,7 +130,7 @@ Each strategy has been calibrated for an optimal timeframe:
 
 | Strategy                     | Optimal Timeframe | Best For                       |
 | ---------------------------- | ----------------- | ------------------------------ |
-| EMA Trend                    | 4h                | Swing trading                  |
+| EMA Trend                    | 1h                | Swing trading                  |
 | RSI                          | 15m               | Intraday reversals             |
 | Bollinger Squeeze            | 15m               | Breakout scalping              |
 | VWAP Stochastic              | 5m                | Intraday scalping              |
@@ -202,14 +202,30 @@ Parameters are automatically adjusted based on timeframe:
 - 15m-1h: Medium-term with balanced parameters
 - 4h-1d: Longer-term with wider parameters
 
-### EMA Trend Strategy (4h)
+### EMA Trend Strategy (1h)
 
-Uses moving average crossovers with RSI confirmation.
+Uses moving average crossovers with RSI confirmation and dynamic parameters optimized for different timeframes:
 
-- Default EMAs: 18 and 42 periods
-- Trend slope calculation over 20 periods
-- RSI for momentum confirmation
-- 2.5% profit target and 1.5% stop loss by default
+For 1h timeframe (default):
+
+- EMAs: 13 and 34 periods
+- Trend slope calculation over 15 periods
+- RSI period: 10 with 70/30 levels
+- 2.0% profit target and 1.2% stop loss
+- Strong momentum confirmation filters
+
+For shorter timeframes (1m-15m):
+
+- Faster EMAs: 9 and 21 periods
+- Tighter stops and more aggressive profit targets
+- More responsive RSI (period: 7) with wider levels (75/25)
+
+For higher timeframes (4h+):
+
+- Longer EMAs: 18 and 42 periods
+- Expanded trend window (20 periods)
+- Standard RSI (period: 14)
+- Higher profit targets (2.5%) with wider stop losses (1.5%)
 
 ## Performance Tracking
 

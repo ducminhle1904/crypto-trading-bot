@@ -24,7 +24,7 @@ async def run_bot(symbol, timeframe, limit, strategy_name, trailing_profit=True)
     
     # Select strategy based on name - using each strategy's optimal timeframe
     if strategy_name == 'ema':
-        strategy = EmaTrendStrategy(use_trailing_profit=trailing_profit)  # Default 4h
+        strategy = EmaTrendStrategy(use_trailing_profit=trailing_profit)  # Default 1h
     elif strategy_name == 'rsi':
         strategy = RsiStrategy(use_trailing_profit=trailing_profit)  # Default 15m
     elif strategy_name == 'squeeze':
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     parser.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
                         help=f'Number of candles to fetch (default: {DEFAULT_LIMIT})')
     parser.add_argument('--strategy', type=str, default='ema',
-                        help='Strategy to run: ema (4h), rsi (15m), squeeze (15m), vwap (5m), dow (4h), vpvwap (5m), vpbb (30m)')
+                        help='Strategy to run: ema (1h), rsi (15m), squeeze (15m), vwap (5m), dow (4h), vpvwap (5m), vpbb (30m)')
     parser.add_argument('--trailing-profit', action='store_true', default=True,
                         help='Enable trailing profit feature to let profitable trades run longer (default: enabled)')
     parser.add_argument('--no-trailing-profit', action='store_false', dest='trailing_profit',
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     
     # Get optimal timeframes for help message
     timeframe_map = {
-        'ema': '4h',
+        'ema': '1h',
         'rsi': '15m',
         'squeeze': '15m',
         'vwap': '5m',
