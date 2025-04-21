@@ -14,6 +14,11 @@ from trading_bot.strategies.vwap_stoch_strategy import VwapStochStrategy
 from trading_bot.strategies.dow_ema_strategy import DowEmaStrategy
 from trading_bot.strategies.volume_profile_vwap_strategy import VolumeProfileVwapStrategy
 from trading_bot.strategies.volume_profile_bollinger_rsi_strategy import VolumeProfileBollingerRsiStrategy
+from trading_bot.strategies.multi_timeframe_strategy import MultiTimeframeStrategy
+from trading_bot.strategies.ssl_basic_strategy import SslBasicStrategy
+from trading_bot.strategies.ssl_rsi_strategy import SslRsiStrategy
+from trading_bot.strategies.ssl_bollinger_strategy import SslBollingerStrategy
+from trading_bot.strategies.ssl_multi_timeframe_strategy import SslMultiTimeframeStrategy
 from trading_bot.config import DEFAULT_SYMBOL, DEFAULT_TIMEFRAME, DEFAULT_LIMIT
 
 
@@ -37,6 +42,16 @@ async def run_bot(symbol, timeframe, limit, strategy_name, trailing_profit=True)
         strategy = VolumeProfileVwapStrategy(use_trailing_profit=trailing_profit)  # Default 5m
     elif strategy_name == 'vpbb':
         strategy = VolumeProfileBollingerRsiStrategy(use_trailing_profit=trailing_profit)  # Default 30m
+    elif strategy_name == 'mtf':
+        strategy = MultiTimeframeStrategy(use_trailing_profit=trailing_profit)  # Default 15m
+    elif strategy_name == 'ssl':
+        strategy = SslBasicStrategy(use_trailing_profit=trailing_profit)  # Default 15m
+    elif strategy_name == 'ssl_rsi':
+        strategy = SslRsiStrategy(use_trailing_profit=trailing_profit)  # Default 15m  
+    elif strategy_name == 'ssl_bb':
+        strategy = SslBollingerStrategy(use_trailing_profit=trailing_profit)  # Default 15m
+    elif strategy_name == 'ssl_mtf':
+        strategy = SslMultiTimeframeStrategy(use_trailing_profit=trailing_profit)  # Default 15m
     else:
         print(f"Strategy '{strategy_name}' not recognized, using default EMA strategy.")
         strategy = EmaTrendStrategy(use_trailing_profit=trailing_profit)
@@ -68,11 +83,12 @@ if __name__ == "__main__":
     parser.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
                         help=f'Number of candles to fetch (default: {DEFAULT_LIMIT})')
     parser.add_argument('--strategy', type=str, default='ema',
-                        help='Strategy to run: ema (1h), rsi (15m), squeeze (15m), vwap (5m), dow (4h), vpvwap (5m), vpbb (30m)')
+                        help='Strategy to run: ema (1h), rsi (15m), squeeze (15m), vwap (5m), dow (4h), vpvwap (5m), '
+                             'vpbb (30m), mtf (15m), ssl (15m), ssl_rsi (15m), ssl_bb (15m), ssl_mtf (15m)')
     parser.add_argument('--trailing-profit', action='store_true', default=True,
                         help='Enable trailing profit feature to let profitable trades run longer (default: enabled)')
     parser.add_argument('--no-trailing-profit', action='store_false', dest='trailing_profit',
-                        help='Disable trailing profit feature and use fixed take profit targets')
+                        help='Disable trailing profit feature and use fixed take-profit targets')
     
     args = parser.parse_args()
     
@@ -91,7 +107,12 @@ if __name__ == "__main__":
         'vwap': '5m',
         'dow': '4h',
         'vpvwap': '5m',
-        'vpbb': '30m'
+        'vpbb': '30m',
+        'mtf': '15m',
+        'ssl': '15m',
+        'ssl_rsi': '15m',
+        'ssl_bb': '15m',
+        'ssl_mtf': '15m'
     }
     optimal_timeframe = timeframe_map.get(args.strategy, DEFAULT_TIMEFRAME)
     

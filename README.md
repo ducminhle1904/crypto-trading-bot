@@ -52,11 +52,20 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
   - More aggressive profit locking with adaptive trailing stops
 
 - **Volume Profile Bollinger RSI Strategy (30m)**: Integrates Volume Profile with Bollinger Bands and RSI
+
   - Identifies key volume levels for high-probability reversals
   - Uses Bollinger Band compression/expansion for volatility timing
   - RSI for momentum confirmation
   - Multi-level trailing profit system with progressive lockout levels
   - Adaptive stop-loss tightening near high-volume zones
+
+- **Multi-Timeframe Strategy (15m)**: Analyzes three timeframes simultaneously for high-probability setups
+  - Primary timeframe (15m): For signal generation and position management
+  - Higher timeframe (1h): For trend confirmation and alignment
+  - Lower timeframe (5m): For precise entry and exit timing
+  - Multi-timeframe exit signals with weighted score system
+  - Dynamic trailing stops adjusted based on timeframe alignment
+  - Adaptive parameters based on volatility conditions
 
 ## Installation
 
@@ -102,6 +111,12 @@ Try the Volume Profile Bollinger RSI strategy:
 python run_bot.py --strategy vpbb
 ```
 
+Try the Multi-Timeframe strategy:
+
+```
+python run_bot.py --strategy mtf
+```
+
 Override the strategy's optimal timeframe:
 
 ```
@@ -121,6 +136,7 @@ python run_bot.py --symbol "ETH/USDT:USDT" --strategy rsi --timeframe 1h
   - `dow` (4h timeframe)
   - `vpvwap` (5m timeframe)
   - `vpbb` (30m timeframe)
+  - `mtf` (15m timeframe)
 - `--trailing-profit`: Enable trailing profit (default: enabled)
 - `--no-trailing-profit`: Disable trailing profit and use fixed take-profit targets
 
@@ -137,6 +153,36 @@ Each strategy has been calibrated for an optimal timeframe:
 | Dow EMA                      | 4h                | Trend following                |
 | Volume Profile VWAP          | 5m                | Day trading w/ better entries  |
 | Volume Profile Bollinger RSI | 30m               | Reversals at key volume levels |
+| Multi-Timeframe              | 15m               | High-probability setups        |
+
+## Multi-Timeframe Strategy
+
+The Multi-Timeframe Strategy combines analysis from three timeframes to generate more reliable trading signals with stronger confirmation:
+
+1. **Primary Timeframe (15m)** - Used for main signal generation and position management
+2. **Higher Timeframe (1h)** - Used for trend confirmation and filtering out weak setups
+3. **Lower Timeframe (5m)** - Used for optimizing entries and exits with better timing
+
+### Signal Generation Logic
+
+The strategy looks for alignment across all three timeframes:
+
+- **Higher Timeframe**: Must confirm the overall trend direction (given 1.5x weight)
+- **Primary Timeframe**: Must show a specific entry opportunity (given 1.0x weight)
+- **Lower Timeframe**: Must confirm momentum in the right direction (given 0.5x weight)
+
+Signals are only generated when there's sufficient agreement across timeframes, resulting in an alignment score of at least 2 out of 3 possible points.
+
+### Key Features
+
+- **Trend Alignment Score**: Weighted 3-point system that measures agreement across timeframes
+- **Adaptive Position Management**: Adjusts stop losses and take profits based on trend strength
+- **Dynamic Breakeven Levels**: Moves to breakeven faster in high volatility conditions
+- **Multi-Timeframe Exit Signals**: Looks for reversal patterns across all timeframes
+- **Extended Holding Time**: Holds positions longer when trend alignment is strong
+- **Volatility-Aware Trailing**: Tightens trailing stops when price extends beyond Bollinger Bands
+
+This strategy provides stronger confirmation than single-timeframe strategies, reducing false signals and improving overall performance across different market conditions.
 
 ## Volume Profile Bollinger RSI Strategy
 

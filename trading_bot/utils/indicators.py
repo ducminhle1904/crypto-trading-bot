@@ -581,3 +581,45 @@ def apply_volume_profile_indicators(df: pd.DataFrame,
     except Exception as e:
         print(f"Error applying volume profile indicators: {e}")
         return df  # Return original dataframe if error 
+
+
+def calculate_ssl_channel(df, period=10):
+    """
+    Calculate SSL Channel (Buy Stop Line and Sell Stop Line) indicators.
+    
+    Args:
+        df: DataFrame with OHLC data
+        period: Period for the SMA calculation
+        
+    Returns:
+        DataFrame with added BSL and SSL columns
+    """
+    sma_high = df['high'].rolling(window=period).mean()
+    sma_low = df['low'].rolling(window=period).mean()
+    
+    # Initialize the BSL/SSL columns
+    df['ssl_up'] = 0.0
+    df['ssl_down'] = 0.0
+    
+    # Initial values
+    df.at[period, 'ssl_down'] = sma_high[period]
+    df.at[period, 'ssl_up'] = sma_low[period]
+    
+    # Calculate SSL Channel
+    for i in range(period+1, len(df)):
+        if df.at[i-1, 'close'] > df.at[i-1, 'ssl_down']:
+            df.at[i, 'ssl_down'] = sma_low[i]
+            df.at[i, 'ssl_up'] = sma_high[i]
+        else:
+            df.at[i, 'ssl_down'] = sma_high[i]
+            df.at[i, 'ssl_up'] = sma_low[i]
+    
+    # Determine trend based on SSL Channel
+    df['ssl_trend'] = 0  # 1 for bullish, -1 for bearish, 0 for neutral
+    for i in range(period+1, len(df)):
+        if df.at[i, 'ssl_up'] > df.at[i, 'ssl_down']:
+            df.at[i, 'ssl_trend'] = 1  # Bullish
+        elif df.at[i, 'ssl_up'] < df.at[i, 'ssl_down']:
+            df.at[i, 'ssl_trend'] = -1  # Bearish
+    
+    return df 
