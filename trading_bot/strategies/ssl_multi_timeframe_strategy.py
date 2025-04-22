@@ -108,27 +108,34 @@ class SslMultiTimeframeStrategy(BaseStrategy):
     
     async def _fetch_multi_timeframe_data(self, df: pd.DataFrame, symbol: str) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
         """Fetch data for higher and lower timeframes."""
-        exchange_client = ExchangeClient()
-        await exchange_client.initialize()
-        
+        exchange_client = None
         try:
+            exchange_client = ExchangeClient()
+            await exchange_client.initialize()
+            
             # Fetch higher timeframe data
             higher_tf_df = await exchange_client.fetch_ohlcv(symbol, self.higher_timeframe, 100)
             if higher_tf_df is not None:
                 higher_tf_df = calculate_ssl_channel(higher_tf_df, period=self.higher_tf_ssl_period)
+            else:
+                logger.warning(f"Unable to fetch higher timeframe ({self.higher_timeframe}) data for {symbol}")
             
             # Fetch lower timeframe data
             lower_tf_df = await exchange_client.fetch_ohlcv(symbol, self.lower_timeframe, 100)
             if lower_tf_df is not None:
                 lower_tf_df = calculate_ssl_channel(lower_tf_df, period=self.lower_tf_ssl_period)
+            else:
+                logger.warning(f"Unable to fetch lower timeframe ({self.lower_timeframe}) data for {symbol}")
             
             # Close the client
-            await exchange_client.close()
+            if exchange_client:
+                await exchange_client.close()
             
             return higher_tf_df, lower_tf_df
         except Exception as e:
             logger.error(f"Error fetching multi-timeframe data: {str(e)}")
-            await exchange_client.close()
+            if exchange_client:
+                await exchange_client.close()
             return None, None
     
     async def calculate_indicators(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -143,16 +150,39 @@ class SslMultiTimeframeStrategy(BaseStrategy):
             # Calculate SSL Channel for primary timeframe
             df = calculate_ssl_channel(df, period=self.ssl_period)
             
-            # Symbol extraction for multi-timeframe data
+            # Extract symbol information
             symbol = None
-            if df.attrs.get('symbol'):
+            
+            # Try multiple methods to get the symbol
+            if hasattr(df, 'attrs') and df.attrs.get('symbol'):
                 symbol = df.attrs.get('symbol')
+            elif 'symbol' in df.columns:
+                symbol = df.iloc[-1]['symbol']
+            # Get symbol from TradingBot instance if available (fallback)
+            elif hasattr(self, 'exchange_client') and hasattr(self.exchange_client, 'current_symbol'):
+                symbol = self.exchange_client.current_symbol
+            
+            # Fallback to default symbol
+            if not symbol:
+                from trading_bot.config import DEFAULT_SYMBOL
+                symbol = DEFAULT_SYMBOL
+                logger.warning(f"Symbol not found in dataframe, using default: {symbol}")
             
             if symbol:
                 # Fetch or update multi-timeframe data
                 current_timestamp = df.iloc[-1]['timestamp']
-                if self.last_update_time is None or (current_timestamp - self.last_update_time).total_seconds() > 60:
-                    self.higher_tf_data, self.lower_tf_data = await self._fetch_multi_timeframe_data(df, symbol)
+                
+                # Only update every minute to avoid excessive API calls
+                if (self.last_update_time is None or 
+                    (current_timestamp - self.last_update_time).total_seconds() > 60):
+                    higher_tf_df, lower_tf_df = await self._fetch_multi_timeframe_data(df, symbol)
+                    
+                    # Only update the data if we received valid dataframes
+                    if higher_tf_df is not None:
+                        self.higher_tf_data = higher_tf_df
+                    if lower_tf_df is not None:
+                        self.lower_tf_data = lower_tf_df
+                        
                     self.last_update_time = current_timestamp
             
             return df
@@ -178,26 +208,60 @@ class SslMultiTimeframeStrategy(BaseStrategy):
         
         # Add higher timeframe contribution if available
         if self.higher_tf_data is not None and len(self.higher_tf_data) > 0:
-            higher_trend = self.higher_tf_data.iloc[-1]['ssl_trend']
-            # Only add score if trends align
-            if higher_trend != 0 and higher_trend == primary_trend:
-                alignment_score += self.higher_tf_weight
+            try:
+                higher_trend = self.higher_tf_data.iloc[-1]['ssl_trend']
+                # Only add score if trends align
+                if higher_trend != 0 and higher_trend == primary_trend:
+                    alignment_score += self.higher_tf_weight
+                alignment_details['higher'] = {
+                    'trend': higher_trend,
+                    'weight': self.higher_tf_weight,
+                    'score': self.higher_tf_weight if higher_trend != 0 and higher_trend == primary_trend else 0
+                }
+            except Exception as e:
+                logger.error(f"Error accessing higher timeframe data: {str(e)}")
+                alignment_details['higher'] = {
+                    'trend': 0,
+                    'weight': self.higher_tf_weight,
+                    'score': 0,
+                    'error': str(e)
+                }
+        else:
+            # No higher timeframe data available
             alignment_details['higher'] = {
-                'trend': higher_trend,
+                'trend': 0,
                 'weight': self.higher_tf_weight,
-                'score': self.higher_tf_weight if higher_trend != 0 and higher_trend == primary_trend else 0
+                'score': 0,
+                'error': 'No data available'
             }
         
         # Add lower timeframe contribution if available
         if self.lower_tf_data is not None and len(self.lower_tf_data) > 0:
-            lower_trend = self.lower_tf_data.iloc[-1]['ssl_trend']
-            # Only add score if trends align
-            if lower_trend != 0 and lower_trend == primary_trend:
-                alignment_score += self.lower_tf_weight
+            try:
+                lower_trend = self.lower_tf_data.iloc[-1]['ssl_trend']
+                # Only add score if trends align
+                if lower_trend != 0 and lower_trend == primary_trend:
+                    alignment_score += self.lower_tf_weight
+                alignment_details['lower'] = {
+                    'trend': lower_trend,
+                    'weight': self.lower_tf_weight,
+                    'score': self.lower_tf_weight if lower_trend != 0 and lower_trend == primary_trend else 0
+                }
+            except Exception as e:
+                logger.error(f"Error accessing lower timeframe data: {str(e)}")
+                alignment_details['lower'] = {
+                    'trend': 0,
+                    'weight': self.lower_tf_weight,
+                    'score': 0,
+                    'error': str(e)
+                }
+        else:
+            # No lower timeframe data available
             alignment_details['lower'] = {
-                'trend': lower_trend,
+                'trend': 0,
                 'weight': self.lower_tf_weight,
-                'score': self.lower_tf_weight if lower_trend != 0 and lower_trend == primary_trend else 0
+                'score': 0,
+                'error': 'No data available'
             }
         
         return alignment_score, alignment_details

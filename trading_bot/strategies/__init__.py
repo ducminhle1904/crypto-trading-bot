@@ -12,4 +12,5 @@ from trading_bot.strategies.multi_timeframe_strategy import MultiTimeframeStrate
 from trading_bot.strategies.ssl_basic_strategy import SslBasicStrategy
 from trading_bot.strategies.ssl_rsi_strategy import SslRsiStrategy
 from trading_bot.strategies.ssl_bollinger_strategy import SslBollingerStrategy
-from trading_bot.strategies.ssl_multi_timeframe_strategy import SslMultiTimeframeStrategy 
+from trading_bot.strategies.ssl_multi_timeframe_strategy import SslMultiTimeframeStrategy
+from trading_bot.strategies.ema_dow_volume_strategy import EmaDowVolumeStrategy 

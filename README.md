@@ -60,12 +60,49 @@ A modular, extensible crypto trading bot with strategy-specific logging and perf
   - Adaptive stop-loss tightening near high-volume zones
 
 - **Multi-Timeframe Strategy (15m)**: Analyzes three timeframes simultaneously for high-probability setups
+
   - Primary timeframe (15m): For signal generation and position management
   - Higher timeframe (1h): For trend confirmation and alignment
   - Lower timeframe (5m): For precise entry and exit timing
   - Multi-timeframe exit signals with weighted score system
   - Dynamic trailing stops adjusted based on timeframe alignment
   - Adaptive parameters based on volatility conditions
+
+- **SSL Basic Strategy (15m)**: Uses SSL Channel (Buy Stop Line and Sell Stop Line) for trend detection
+
+  - Generates signals when price crosses the SSL lines
+  - Identifies trend direction changes early
+  - Trailing stops based on SSL lines
+  - Adaptive profit targets based on volatility
+
+- **SSL RSI Strategy (15m)**: Combines SSL Channel with RSI for confirmation
+
+  - Requires both SSL trend change and RSI confirmation for entries
+  - Filters out weak signals with RSI overbought/oversold conditions
+  - Dynamic trailing stops based on both SSL and RSI readings
+  - Adjusts profit targets based on trend strength
+
+- **SSL Bollinger Strategy (15m)**: Integrates SSL Channel with Bollinger Bands
+
+  - Enters when SSL trend changes while price is near Bollinger Band extremes
+  - Detects volatility expansion opportunities with Bollinger squeeze
+  - Adapts trailing stops based on price position within bands
+  - Perfect for capturing trending moves after consolidation
+
+- **SSL Multi-Timeframe Strategy (15m)**: Uses SSL Channel across three timeframes
+
+  - Primary (15m), higher (1h), and lower (5m) timeframes
+  - Weighted alignment score for stronger confirmation
+  - Dynamic position management based on timeframe agreement
+  - Extends holding time when trend alignment is strong across timeframes
+
+- **EMA Dow Volume Strategy (1h)**: Combines EMA, Dow Theory principles, and Volume analysis
+  - Uses EMA crossovers for trend identification
+  - Applies Dow Theory price structure analysis (higher highs/lows or lower highs/lows)
+  - Volume confirmation for entry/exit signals
+  - Smart trailing stops using swing points
+  - Adjusts parameters dynamically based on timeframe
+  - Advanced position management with trend and volume awareness
 
 ## Installation
 
@@ -137,6 +174,11 @@ python run_bot.py --symbol "ETH/USDT:USDT" --strategy rsi --timeframe 1h
   - `vpvwap` (5m timeframe)
   - `vpbb` (30m timeframe)
   - `mtf` (15m timeframe)
+  - `ssl` (15m timeframe)
+  - `ssl_rsi` (15m timeframe)
+  - `ssl_bb` (15m timeframe)
+  - `ssl_mtf` (15m timeframe)
+  - `ema_dow_vol` (1h timeframe)
 - `--trailing-profit`: Enable trailing profit (default: enabled)
 - `--no-trailing-profit`: Disable trailing profit and use fixed take-profit targets
 
@@ -154,6 +196,11 @@ Each strategy has been calibrated for an optimal timeframe:
 | Volume Profile VWAP          | 5m                | Day trading w/ better entries  |
 | Volume Profile Bollinger RSI | 30m               | Reversals at key volume levels |
 | Multi-Timeframe              | 15m               | High-probability setups        |
+| SSL Basic                    | 15m               | Early trend detection          |
+| SSL RSI                      | 15m               | Confirmed trend reversals      |
+| SSL Bollinger                | 15m               | Volatility expansion trades    |
+| SSL Multi-Timeframe          | 15m               | Strong trend alignment         |
+| EMA Dow Volume               | 1h                | Strong trend following         |
 
 ## Multi-Timeframe Strategy
 
@@ -351,3 +398,71 @@ class YourStrategy(BaseStrategy):
 ## License
 
 MIT License
+
+## SSL Channel Strategies
+
+The SSL (Sell Stop Line) and BSL (Buy Stop Line) Channel indicators act as dynamic support and resistance levels.
+When price crosses these lines, it often signals a change in trend direction.
+
+### SSL Basic Strategy (15m)
+
+This strategy uses the SSL Channel for simple and effective trend-following:
+
+- Generates buy signals when price crosses above the SSL line
+- Generates sell signals when price crosses below the BSL line
+- Trails stops using the opposite SSL/BSL line
+- Adapts to market volatility with timeframe-specific settings
+
+### SSL RSI Strategy (15m)
+
+Combines SSL Channel with RSI confirmation for stronger signals:
+
+- Long entries: SSL bullish trend + RSI oversold or rising
+- Short entries: SSL bearish trend + RSI overbought or falling
+- Dynamic breakeven levels based on trend strength
+- Adjusts profit targets with RSI readings
+- Adapts to different timeframes with optimized parameters
+
+### SSL Bollinger Strategy (15m)
+
+Integrates SSL Channel with Bollinger Bands for volatility awareness:
+
+- Enters on SSL trend changes when price is near Bollinger Band extremes
+- Uses Bollinger Band squeeze to detect potential breakouts
+- Exits when price reaches opposite Bollinger Band
+- Adjusts trailing stops based on price position within bands
+- Combines trend and mean-reversion principles
+
+### SSL Multi-Timeframe Strategy (15m)
+
+Uses SSL Channel across multiple timeframes for high-probability setups:
+
+- Analyzes primary (15m), higher (1h), and lower (5m) timeframes
+- Uses weighted alignment score (3.0 max) with higher timeframes given more weight
+- Requires alignment score of at least 2.0 for entry
+- Extends holding time when alignment is strong
+- Tightens stops when alignment weakens
+
+## EMA Dow Volume Strategy (1h)
+
+The EMA Dow Volume Strategy combines three powerful components:
+
+1. **EMA Analysis** - Uses three EMAs (fast, slow, and trend) for trend identification
+2. **Dow Theory Implementation** - Analyzes price structure for higher highs/lows or lower highs/lows
+3. **Volume Analysis** - Confirms signals with volume expansion and detects volume gaps
+
+This strategy specifically looks for high-probability continuation patterns where:
+
+- EMA crossovers align with the primary trend direction
+- Dow Theory principles confirm the trend (higher highs and higher lows for uptrend)
+- Significant volume confirms the trend movement
+
+Key features:
+
+- **Swing point analysis** - Identifies key swing highs and lows for trailing stops
+- **Volume surge detection** - Uses volume expansion as confirmation
+- **Adaptive parameters** - Adjusts EMA periods, swing lookback, and volume thresholds by timeframe
+- **Dynamic position management** - Adjusts trailing stops based on trend strength and volume
+- **Automated breakeven** - Moves to breakeven after 3 candles or on significant profit
+
+This strategy works best on 1h timeframe for swing trading but adapts well to all timeframes.

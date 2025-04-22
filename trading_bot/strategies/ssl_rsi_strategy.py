@@ -117,65 +117,65 @@ class SslRsiStrategy(BaseStrategy):
         price_cross_down = prev['close'] >= prev['ssl_up'] and last['close'] < last['ssl_up']
         
         # RSI conditions
-        rsi_oversold = last['rsi'] < self.rsi_oversold
-        rsi_overbought = last['rsi'] > self.rsi_overbought
-        rsi_rising = last['rsi'] > prev['rsi']
-        rsi_falling = last['rsi'] < prev['rsi']
+        rsi_oversold = last['fast_rsi'] < self.rsi_oversold
+        rsi_overbought = last['fast_rsi'] > self.rsi_overbought
+        rsi_rising = last['fast_rsi'] > prev['fast_rsi']
+        rsi_falling = last['fast_rsi'] < prev['fast_rsi']
         
         # Combined signals
         long_condition = ((ssl_crossover_bull or price_cross_up) and last['ssl_trend'] > 0) and \
-                        (rsi_oversold or (rsi_rising and last['rsi'] < 60))
+                        (rsi_oversold or (rsi_rising and last['fast_rsi'] < 60))
         
         short_condition = ((ssl_crossover_bear or price_cross_down) and last['ssl_trend'] < 0) and \
-                        (rsi_overbought or (rsi_falling and last['rsi'] > 40))
+                        (rsi_overbought or (rsi_falling and last['fast_rsi'] > 40))
         
         if long_condition:
             long_signals.append("SSL bullish trend with RSI confirmation")
             long_signals.append(f"SSL Up: {last['ssl_up']:.2f}, SSL Down: {last['ssl_down']:.2f}")
-            long_signals.append(f"RSI: {last['rsi']:.2f}")
+            long_signals.append(f"RSI: {last['fast_rsi']:.2f}")
             if ssl_crossover_bull:
                 long_signals.append("SSL Crossover: Trend changed from bearish/neutral to bullish")
             if price_cross_up:
                 long_signals.append("Price crossed above SSL Down line")
             if rsi_oversold:
-                long_signals.append(f"RSI oversold: {last['rsi']:.2f} < {self.rsi_oversold}")
+                long_signals.append(f"RSI oversold: {last['fast_rsi']:.2f} < {self.rsi_oversold}")
             elif rsi_rising:
-                long_signals.append(f"RSI rising: {prev['rsi']:.2f} -> {last['rsi']:.2f}")
+                long_signals.append(f"RSI rising: {prev['fast_rsi']:.2f} -> {last['fast_rsi']:.2f}")
         else:
             if not (ssl_crossover_bull or price_cross_up) or last['ssl_trend'] <= 0:
                 fail_reasons.append("No SSL bullish signal")
-            if not (rsi_oversold or (rsi_rising and last['rsi'] < 60)):
-                fail_reasons.append(f"No RSI confirmation: {last['rsi']:.2f}")
+            if not (rsi_oversold or (rsi_rising and last['fast_rsi'] < 60)):
+                fail_reasons.append(f"No RSI confirmation: {last['fast_rsi']:.2f}")
         
         if short_condition:
             short_signals.append("SSL bearish trend with RSI confirmation")
             short_signals.append(f"SSL Up: {last['ssl_up']:.2f}, SSL Down: {last['ssl_down']:.2f}")
-            short_signals.append(f"RSI: {last['rsi']:.2f}")
+            short_signals.append(f"RSI: {last['fast_rsi']:.2f}")
             if ssl_crossover_bear:
                 short_signals.append("SSL Crossover: Trend changed from bullish/neutral to bearish")
             if price_cross_down:
                 short_signals.append("Price crossed below SSL Up line")
             if rsi_overbought:
-                short_signals.append(f"RSI overbought: {last['rsi']:.2f} > {self.rsi_overbought}")
+                short_signals.append(f"RSI overbought: {last['fast_rsi']:.2f} > {self.rsi_overbought}")
             elif rsi_falling:
-                short_signals.append(f"RSI falling: {prev['rsi']:.2f} -> {last['rsi']:.2f}")
+                short_signals.append(f"RSI falling: {prev['fast_rsi']:.2f} -> {last['fast_rsi']:.2f}")
         
         close_condition = False
         if position:
             # Exit long when SSL turns bearish or RSI gets overbought
-            if position.side == 'long' and (last['ssl_trend'] < 0 or last['rsi'] > self.rsi_overbought):
+            if position.side == 'long' and (last['ssl_trend'] < 0 or last['fast_rsi'] > self.rsi_overbought):
                 if last['ssl_trend'] < 0:
                     close_signals.append("SSL trend changed to bearish")
-                if last['rsi'] > self.rsi_overbought:
-                    close_signals.append(f"RSI overbought: {last['rsi']:.2f} > {self.rsi_overbought}")
+                if last['fast_rsi'] > self.rsi_overbought:
+                    close_signals.append(f"RSI overbought: {last['fast_rsi']:.2f} > {self.rsi_overbought}")
                 close_condition = True
             
             # Exit short when SSL turns bullish or RSI gets oversold
-            elif position.side == 'short' and (last['ssl_trend'] > 0 or last['rsi'] < self.rsi_oversold):
+            elif position.side == 'short' and (last['ssl_trend'] > 0 or last['fast_rsi'] < self.rsi_oversold):
                 if last['ssl_trend'] > 0:
                     close_signals.append("SSL trend changed to bullish")
-                if last['rsi'] < self.rsi_oversold:
-                    close_signals.append(f"RSI oversold: {last['rsi']:.2f} < {self.rsi_oversold}")
+                if last['fast_rsi'] < self.rsi_oversold:
+                    close_signals.append(f"RSI oversold: {last['fast_rsi']:.2f} < {self.rsi_oversold}")
                 close_condition = True
         
         long_signal = long_condition and not position
@@ -239,10 +239,10 @@ class SslRsiStrategy(BaseStrategy):
                 # Adjust pullback allowance based on RSI
                 if position.side == 'long':
                     # For longs, allow smaller pullbacks when RSI is falling
-                    rsi_factor = 0.3 if (prev and last['rsi'] < prev['rsi']) else 0.4
+                    rsi_factor = 0.3 if (prev and last['fast_rsi'] < prev['fast_rsi']) else 0.4
                 else:
                     # For shorts, allow smaller pullbacks when RSI is rising
-                    rsi_factor = 0.3 if (prev and last['rsi'] > prev['rsi']) else 0.4
+                    rsi_factor = 0.3 if (prev and last['fast_rsi'] > prev['fast_rsi']) else 0.4
                 
                 max_pullback = position.highest_profit_pct * rsi_factor
                 
@@ -257,16 +257,16 @@ class SslRsiStrategy(BaseStrategy):
             if last['ssl_trend'] < 0:
                 close_signals.append("SSL trend changed to bearish")
                 close_condition = True
-            elif last['rsi'] > self.rsi_overbought and prev and last['rsi'] < prev['rsi']:
-                close_signals.append(f"RSI overbought and falling: {last['rsi']:.2f}")
+            elif last['fast_rsi'] > self.rsi_overbought and prev and last['fast_rsi'] < prev['fast_rsi']:
+                close_signals.append(f"RSI overbought and falling: {last['fast_rsi']:.2f}")
                 close_condition = True
         else:  # short
             # Exit short when SSL turns bullish or RSI gets oversold and starts rising
             if last['ssl_trend'] > 0:
                 close_signals.append("SSL trend changed to bullish")
                 close_condition = True
-            elif last['rsi'] < self.rsi_oversold and prev and last['rsi'] > prev['rsi']:
-                close_signals.append(f"RSI oversold and rising: {last['rsi']:.2f}")
+            elif last['fast_rsi'] < self.rsi_oversold and prev and last['fast_rsi'] > prev['fast_rsi']:
+                close_signals.append(f"RSI oversold and rising: {last['fast_rsi']:.2f}")
                 close_condition = True
         
         # Check for stop loss hit

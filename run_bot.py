@@ -19,6 +19,7 @@ from trading_bot.strategies.ssl_basic_strategy import SslBasicStrategy
 from trading_bot.strategies.ssl_rsi_strategy import SslRsiStrategy
 from trading_bot.strategies.ssl_bollinger_strategy import SslBollingerStrategy
 from trading_bot.strategies.ssl_multi_timeframe_strategy import SslMultiTimeframeStrategy
+from trading_bot.strategies.ema_dow_volume_strategy import EmaDowVolumeStrategy
 from trading_bot.config import DEFAULT_SYMBOL, DEFAULT_TIMEFRAME, DEFAULT_LIMIT
 
 
@@ -52,6 +53,8 @@ async def run_bot(symbol, timeframe, limit, strategy_name, trailing_profit=True)
         strategy = SslBollingerStrategy(use_trailing_profit=trailing_profit)  # Default 15m
     elif strategy_name == 'ssl_mtf':
         strategy = SslMultiTimeframeStrategy(use_trailing_profit=trailing_profit)  # Default 15m
+    elif strategy_name == 'ema_dow_vol':
+        strategy = EmaDowVolumeStrategy(use_trailing_profit=trailing_profit)  # Default 1h
     else:
         print(f"Strategy '{strategy_name}' not recognized, using default EMA strategy.")
         strategy = EmaTrendStrategy(use_trailing_profit=trailing_profit)
@@ -84,7 +87,7 @@ if __name__ == "__main__":
                         help=f'Number of candles to fetch (default: {DEFAULT_LIMIT})')
     parser.add_argument('--strategy', type=str, default='ema',
                         help='Strategy to run: ema (1h), rsi (15m), squeeze (15m), vwap (5m), dow (4h), vpvwap (5m), '
-                             'vpbb (30m), mtf (15m), ssl (15m), ssl_rsi (15m), ssl_bb (15m), ssl_mtf (15m)')
+                             'vpbb (30m), mtf (15m), ssl (15m), ssl_rsi (15m), ssl_bb (15m), ssl_mtf (15m), ema_dow_vol (1h)')
     parser.add_argument('--trailing-profit', action='store_true', default=True,
                         help='Enable trailing profit feature to let profitable trades run longer (default: enabled)')
     parser.add_argument('--no-trailing-profit', action='store_false', dest='trailing_profit',
@@ -112,7 +115,8 @@ if __name__ == "__main__":
         'ssl': '15m',
         'ssl_rsi': '15m',
         'ssl_bb': '15m',
-        'ssl_mtf': '15m'
+        'ssl_mtf': '15m',
+        'ema_dow_vol': '1h'
     }
     optimal_timeframe = timeframe_map.get(args.strategy, DEFAULT_TIMEFRAME)
     
